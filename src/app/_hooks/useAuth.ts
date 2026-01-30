@@ -126,6 +126,32 @@ export function useAuth({ showToast }: UseAuthParams) {
     return headers
   }, [session, currentTeamId])
 
+  // Fetch teams from API and update state
+  const fetchTeams = useCallback(async (accessToken: string) => {
+    try {
+      const response = await fetch('/api/teams', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      if (!response.ok) return
+      const data = (await response.json()) as { teams?: Team[] }
+      const fetchedTeams = data.teams || []
+      setTeams(fetchedTeams)
+      localStorage.setItem(STORAGE_KEYS.teams, JSON.stringify(fetchedTeams))
+
+      const storedTeamId = localStorage.getItem(STORAGE_KEYS.currentTeam)
+      const nextTeamId = storedTeamId && fetchedTeams.some(t => t.id === storedTeamId)
+        ? storedTeamId
+        : fetchedTeams[0]?.id || null
+
+      if (nextTeamId) {
+        setCurrentTeamId(nextTeamId)
+        localStorage.setItem(STORAGE_KEYS.currentTeam, nextTeamId)
+      }
+    } catch {
+      // Ignore fetch errors
+    }
+  }, [])
+
   // Initialize Supabase auth listener
   useEffect(() => {
     // Get initial session
@@ -136,15 +162,8 @@ export function useAuth({ showToast }: UseAuthParams) {
           refresh_token: supaSession.refresh_token,
           user: { id: supaSession.user.id, email: supaSession.user.email || '' }
         })
-        // Load teams from localStorage
-        const storedTeams = JSON.parse(localStorage.getItem(STORAGE_KEYS.teams) || '[]') as Team[]
-        const storedTeamId = localStorage.getItem(STORAGE_KEYS.currentTeam)
-        setTeams(storedTeams)
-        if (storedTeamId && storedTeams.some(t => t.id === storedTeamId)) {
-          setCurrentTeamId(storedTeamId)
-        } else if (storedTeams.length > 0) {
-          setCurrentTeamId(storedTeams[0].id)
-        }
+        // Fetch teams from API
+        void fetchTeams(supaSession.access_token)
       }
       setInitializing(false)
     })
@@ -153,17 +172,24 @@ export function useAuth({ showToast }: UseAuthParams) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, supaSession) => {
       if (event === 'SIGNED_OUT' || !supaSession) {
         clearSession()
-      } else if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+      } else if (event === 'TOKEN_REFRESHED') {
         setSession({
           access_token: supaSession.access_token,
           refresh_token: supaSession.refresh_token,
           user: { id: supaSession.user.id, email: supaSession.user.email || '' }
         })
+      } else if (event === 'SIGNED_IN') {
+        setSession({
+          access_token: supaSession.access_token,
+          refresh_token: supaSession.refresh_token,
+          user: { id: supaSession.user.id, email: supaSession.user.email || '' }
+        })
+        void fetchTeams(supaSession.access_token)
       }
     })
 
     return () => subscription.unsubscribe()
-  }, [clearSession])
+  }, [clearSession, fetchTeams])
 
   useEffect(() => {
     return () => {
