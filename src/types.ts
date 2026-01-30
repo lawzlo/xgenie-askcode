@@ -57,7 +57,7 @@ export interface CreateProjectRequest {
 
 export interface RepoInfo {
   gitUrl: string
-  branch: string
+  branch?: string  // Auto-detect if not provided
   name: string  // repo name for subdirectory
 }
 

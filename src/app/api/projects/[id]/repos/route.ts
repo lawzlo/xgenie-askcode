@@ -21,7 +21,7 @@ const AddReposSchema = z.object({
     .array(
       z.object({
         gitUrl: z.string().url(),
-        branch: z.string(),
+        branch: z.string().optional(), // Auto-detect if not provided
         name: z.string().min(1)
       })
     )

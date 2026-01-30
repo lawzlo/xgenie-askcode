@@ -36,12 +36,31 @@ export async function initWorkspaceRoot(): Promise<void> {
   await fs.mkdir(WORKSPACE_ROOT, { recursive: true })
 }
 
+// Detect default branch from git URL using ls-remote
+async function detectDefaultBranch(gitUrl: string): Promise<string> {
+  try {
+    const git = simpleGit()
+    const result = await git.listRemote(['--symref', gitUrl, 'HEAD'])
+    // Parse output like: "ref: refs/heads/main	HEAD"
+    const match = result.match(/ref: refs\/heads\/(\S+)\s+HEAD/)
+    if (match) {
+      return match[1]
+    }
+  } catch (err) {
+    console.warn('Failed to detect default branch:', err)
+  }
+  return 'main' // fallback
+}
+
 export async function createProject(
   userId: string,
   teamId: string,
   request: CreateProjectRequest
 ): Promise<Project> {
   const workspacePath = path.join(WORKSPACE_ROOT, `${teamId}_${Date.now()}`)
+
+  // Auto-detect default branch if not provided
+  const branch = request.branch || await detectDefaultBranch(request.gitUrl)
 
   // Insert into database first to get the ID
   const { data, error } = await supabase
@@ -51,7 +70,7 @@ export async function createProject(
       team_id: teamId,
       name: request.name,
       git_url: request.gitUrl,
-      branch: request.branch || 'main',
+      branch,
       workspace_path: workspacePath,
       git_provider_id: request.gitProviderId || null,
       credentials: request.credentials ? { token: request.credentials.token } : null
@@ -420,12 +439,13 @@ export async function createMultiRepoProject(
     // Create workspace directory
     await fs.mkdir(workspacePath, { recursive: true })
 
-    // Clone all repositories
+    // Clone all repositories (detect branch if not provided)
     for (const repo of request.repos) {
+      const branch = repo.branch || await detectDefaultBranch(repo.gitUrl)
       const repoPath = path.join(workspacePath, repo.name)
       await cloneRepositoryToPath(
         repo.gitUrl,
-        repo.branch,
+        branch,
         repoPath,
         request.gitProviderId,
         teamId
@@ -479,13 +499,16 @@ export async function addReposToProject(
     throw new Error(`Repository already exists in project: ${duplicates[0].gitUrl}`)
   }
 
-  // Clone new repos to workspace
+  // Clone new repos to workspace (detect branch if not provided)
   const workspacePath = projectData.workspace_path
+  const reposWithBranch: { gitUrl: string; branch: string; name: string }[] = []
   for (const repo of repos) {
+    const branch = repo.branch || await detectDefaultBranch(repo.gitUrl)
+    reposWithBranch.push({ gitUrl: repo.gitUrl, branch, name: repo.name })
     const repoPath = path.join(workspacePath, repo.name)
     await cloneRepositoryToPath(
       repo.gitUrl,
-      repo.branch,
+      branch,
       repoPath,
       gitProviderId || projectData.git_provider_id,
       teamId
@@ -495,7 +518,7 @@ export async function addReposToProject(
   // Update git_urls in database
   const newGitUrls = [
     ...existingGitUrls,
-    ...repos.map(r => ({ url: r.gitUrl, branch: r.branch, name: r.name }))
+    ...reposWithBranch.map(r => ({ url: r.gitUrl, branch: r.branch, name: r.name }))
   ]
 
   const { error: updateError } = await supabase

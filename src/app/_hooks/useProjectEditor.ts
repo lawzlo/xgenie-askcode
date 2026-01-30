@@ -129,13 +129,15 @@ export function useProjectEditor({
     try {
       if (addToProjectId) {
         const repoName = extractRepoName(gitUrl.trim())
-        const branch = gitBranch.trim() || 'main'
+        const repo: { gitUrl: string; name: string; branch?: string } = {
+          gitUrl: gitUrl.trim(),
+          name: repoName
+        }
+        if (gitBranch.trim()) repo.branch = gitBranch.trim()
         const response = await fetch(`/api/projects/${addToProjectId}/repos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({
-            repos: [{ gitUrl: gitUrl.trim(), branch, name: repoName }]
-          })
+          body: JSON.stringify({ repos: [repo] })
         })
         const data = (await response.json()) as { error?: string; message?: string }
         if (response.status === 401) {
