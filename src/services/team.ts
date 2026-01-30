@@ -1,0 +1,330 @@
+import { supabase } from '../lib/supabase'
+
+export interface Team {
+  id: string
+  name: string
+  owner_id: string
+  created_at: string
+}
+
+export interface TeamMember {
+  team_id: string
+  user_id: string
+  created_at: string
+  // Joined fields
+  email?: string
+}
+
+export interface TeamInvite {
+  id: string
+  team_id: string
+  email: string
+  invited_by: string | null
+  created_at: string
+}
+
+// Create a new team (called on signup)
+export async function createTeam(ownerId: string, name: string): Promise<Team> {
+  const { data, error } = await supabase
+    .from('teams')
+    .insert({ owner_id: ownerId, name })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+// Get all teams for a user (owned + member of)
+export async function getUserTeams(userId: string): Promise<Team[]> {
+  // Get owned teams
+  const { data: ownedTeams, error: ownedError } = await supabase
+    .from('teams')
+    .select('*')
+    .eq('owner_id', userId)
+
+  if (ownedError) throw ownedError
+
+  // Get teams user is a member of
+  const { data: memberTeams, error: memberError } = await supabase
+    .from('team_members')
+    .select('team_id')
+    .eq('user_id', userId)
+
+  if (memberError) throw memberError
+
+  if (memberTeams.length === 0) {
+    return ownedTeams || []
+  }
+
+  const memberTeamIds = memberTeams.map(m => m.team_id)
+  const { data: teams, error: teamsError } = await supabase
+    .from('teams')
+    .select('*')
+    .in('id', memberTeamIds)
+
+  if (teamsError) throw teamsError
+
+  return [...(ownedTeams || []), ...(teams || [])]
+}
+
+// Get a single team
+export async function getTeam(teamId: string, userId: string): Promise<Team | null> {
+  const teams = await getUserTeams(userId)
+  return teams.find(t => t.id === teamId) || null
+}
+
+// Update team name (owner only)
+export async function updateTeam(teamId: string, ownerId: string, name: string): Promise<Team> {
+  const { data, error } = await supabase
+    .from('teams')
+    .update({ name })
+    .eq('id', teamId)
+    .eq('owner_id', ownerId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+// Delete team (owner only)
+export async function deleteTeam(teamId: string, ownerId: string): Promise<void> {
+  const { error } = await supabase
+    .from('teams')
+    .delete()
+    .eq('id', teamId)
+    .eq('owner_id', ownerId)
+
+  if (error) throw error
+}
+
+// Get team members (including owner)
+export async function getTeamMembers(teamId: string): Promise<{ user_id: string; email: string; role: 'owner' | 'member'; access_level: number }[]> {
+  // Get team to find owner
+  const { data: team, error: teamError } = await supabase
+    .from('teams')
+    .select('owner_id')
+    .eq('id', teamId)
+    .single()
+
+  if (teamError) throw teamError
+
+  // Get owner info
+  const { data: ownerData } = await supabase.auth.admin.getUserById(team.owner_id)
+
+  const members: { user_id: string; email: string; role: 'owner' | 'member'; access_level: number }[] = []
+
+  if (ownerData?.user) {
+    members.push({
+      user_id: team.owner_id,
+      email: ownerData.user.email || '',
+      role: 'owner',
+      access_level: 100  // Owner always has full access
+    })
+  }
+
+  // Get other members with access_level
+  const { data: teamMembers, error: membersError } = await supabase
+    .from('team_members')
+    .select('user_id, access_level')
+    .eq('team_id', teamId)
+
+  if (membersError) throw membersError
+
+  for (const member of teamMembers || []) {
+    const { data: userData } = await supabase.auth.admin.getUserById(member.user_id)
+    if (userData?.user) {
+      members.push({
+        user_id: member.user_id,
+        email: userData.user.email || '',
+        role: 'member',
+        access_level: member.access_level ?? 60
+      })
+    }
+  }
+
+  return members
+}
+
+// Update member access level (owner only)
+export async function updateMemberAccessLevel(teamId: string, userId: string, accessLevel: number): Promise<void> {
+  // Validate access level
+  if (![30, 60, 100].includes(accessLevel)) {
+    throw new Error('Invalid access level. Must be 30, 60, or 100.')
+  }
+
+  const { error } = await supabase
+    .from('team_members')
+    .update({ access_level: accessLevel })
+    .eq('team_id', teamId)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+// Invite a user by email
+export async function inviteToTeam(teamId: string, email: string, invitedBy: string, redirectTo?: string): Promise<TeamInvite> {
+  const normalizedEmail = email.toLowerCase()
+
+  // Store invite in database
+  const { data, error } = await supabase
+    .from('team_invites')
+    .insert({ team_id: teamId, email: normalizedEmail, invited_by: invitedBy })
+    .select()
+    .single()
+
+  if (error) throw error
+
+  // Check if user already exists
+  const { data: existingUsers } = await supabase.auth.admin.listUsers()
+  const userExists = existingUsers?.users?.some(u => u.email?.toLowerCase() === normalizedEmail)
+
+  if (!userExists) {
+    // Send Supabase invite email for new user
+    try {
+      await supabase.auth.admin.inviteUserByEmail(normalizedEmail, {
+        redirectTo: redirectTo || undefined,
+      })
+    } catch (inviteError) {
+      console.error('Failed to send invite email:', inviteError)
+      // Don't fail the invite if email fails - they can still sign up manually
+    }
+  }
+  // For existing users, they'll see the invite when they log in via processInvitesForUser()
+
+  return data
+}
+
+// Get pending invites for a team
+export async function getTeamInvites(teamId: string): Promise<TeamInvite[]> {
+  const { data, error } = await supabase
+    .from('team_invites')
+    .select('*')
+    .eq('team_id', teamId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+// Cancel an invite
+export async function cancelInvite(inviteId: string, teamId: string): Promise<void> {
+  const { error } = await supabase
+    .from('team_invites')
+    .delete()
+    .eq('id', inviteId)
+    .eq('team_id', teamId)
+
+  if (error) throw error
+}
+
+// Check and process invites for a user (called on login)
+export async function processInvitesForUser(userId: string, email: string): Promise<Team[]> {
+  // Find invites for this email
+  const { data: invites, error: invitesError } = await supabase
+    .from('team_invites')
+    .select('*, teams(*)')
+    .eq('email', email.toLowerCase())
+
+  if (invitesError) throw invitesError
+  if (!invites || invites.length === 0) return []
+
+  const joinedTeams: Team[] = []
+
+  for (const invite of invites) {
+    // Add user to team
+    const { error: memberError } = await supabase
+      .from('team_members')
+      .insert({ team_id: invite.team_id, user_id: userId })
+
+    if (!memberError) {
+      // Delete the invite
+      await supabase
+        .from('team_invites')
+        .delete()
+        .eq('id', invite.id)
+
+      if (invite.teams) {
+        joinedTeams.push(invite.teams as Team)
+      }
+    }
+  }
+
+  return joinedTeams
+}
+
+// Remove a member from team (owner only)
+export async function removeMember(teamId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('team_members')
+    .delete()
+    .eq('team_id', teamId)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+// Get user's access level for a team
+export async function getUserAccessLevel(teamId: string, userId: string): Promise<number> {
+  // Check if user is owner (always 100)
+  const { data: team } = await supabase
+    .from('teams')
+    .select('owner_id')
+    .eq('id', teamId)
+    .single()
+
+  if (team?.owner_id === userId) {
+    return 100
+  }
+
+  // Get member's access level
+  const { data: member } = await supabase
+    .from('team_members')
+    .select('access_level')
+    .eq('team_id', teamId)
+    .eq('user_id', userId)
+    .single()
+
+  return member?.access_level ?? 60
+}
+
+// Leave a team (member only, not owner)
+export async function leaveTeam(teamId: string, userId: string): Promise<void> {
+  // Check user is not the owner
+  const { data: team } = await supabase
+    .from('teams')
+    .select('owner_id')
+    .eq('id', teamId)
+    .single()
+
+  if (team?.owner_id === userId) {
+    throw new Error('Owner cannot leave team. Transfer ownership or delete team.')
+  }
+
+  const { error } = await supabase
+    .from('team_members')
+    .delete()
+    .eq('team_id', teamId)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+// Check if user has access to team
+export async function hasTeamAccess(teamId: string, userId: string): Promise<boolean> {
+  const teams = await getUserTeams(userId)
+  return teams.some(t => t.id === teamId)
+}
+
+// Check if user is team owner
+export async function isTeamOwner(teamId: string, userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('teams')
+    .select('id')
+    .eq('id', teamId)
+    .eq('owner_id', userId)
+    .single()
+
+  return !!data
+}

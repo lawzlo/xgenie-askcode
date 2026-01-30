@@ -1,0 +1,6 @@
+# Nixpacks configuration for Dokploy
+[phases.setup]
+nixPkgs = ["nodejs", "postgresql", "git"]
+
+[start]
+cmd = "sh -c 'node scripts/migrate.cjs && npm start'"

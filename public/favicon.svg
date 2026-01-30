@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- White border -->
+  <rect x="4" y="4" width="92" height="92" fill="#D2691E" stroke="white" stroke-width="4"/>
+  <!-- Black A like header -->
+  <text x="50" y="70" font-family="Georgia, serif" font-size="58" font-weight="bold" fill="black" text-anchor="middle">A</text>
+</svg>

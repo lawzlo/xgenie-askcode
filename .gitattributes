@@ -1,0 +1,3 @@
+# Override GitHub linguist detection
+*.tsx linguist-language=TypeScript
+*.jsx linguist-language=JavaScript
