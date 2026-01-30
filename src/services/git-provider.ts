@@ -58,8 +58,7 @@ type GithubBranch = { name: string }
 export function isProviderAuthenticated(provider: GitProvider): boolean {
   switch (provider.provider) {
     case 'github':
-      // Support both GitHub App and OAuth token
-      return haveGithubAppRequirements(provider) || !!provider.access_token
+      return haveGithubAppRequirements(provider)
     case 'gitea':
     case 'gitlab':
     case 'bitbucket':
@@ -89,11 +88,8 @@ export function getAuthUsername(provider: GitProvider): string {
 export async function getProviderToken(provider: GitProvider): Promise<string | null> {
   switch (provider.provider) {
     case 'github':
-      // Prefer GitHub App, fall back to OAuth token
-      if (haveGithubAppRequirements(provider)) {
-        return getGithubAppToken(provider)
-      }
-      return provider.access_token
+      if (!haveGithubAppRequirements(provider)) return null
+      return getGithubAppToken(provider)
     case 'gitea':
       return refreshGiteaToken(provider)
     case 'gitlab':
