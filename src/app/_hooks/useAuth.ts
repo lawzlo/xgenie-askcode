@@ -19,6 +19,10 @@ export function useAuth({ showToast }: UseAuthParams) {
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
 
+  // Use ref for showToast to avoid effect re-runs
+  const showToastRef = useRef(showToast)
+  showToastRef.current = showToast
+
   const [authMode, setAuthMode] = useState<AuthMode>('login')
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authEmail, setAuthEmail] = useState('')
@@ -111,9 +115,9 @@ export function useAuth({ showToast }: UseAuthParams) {
     localStorage.removeItem(STORAGE_KEYS.teams)
     localStorage.removeItem(STORAGE_KEYS.currentTeam)
     if (reason === 'expired') {
-      showToast('Session expired. Please log in again.', 'error')
+      showToastRef.current('Session expired. Please log in again.', 'error')
     }
-  }, [showToast])
+  }, [])
 
   const getAuthHeaders = useCallback((): Record<string, string> => {
     if (!session) return {}
@@ -154,37 +158,25 @@ export function useAuth({ showToast }: UseAuthParams) {
 
   // Initialize Supabase auth listener
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session: supaSession } }) => {
-      if (supaSession) {
+    // Listen for auth changes (handles token refresh automatically)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, supaSession) => {
+      if (event === 'SIGNED_OUT' || !supaSession) {
+        clearSession()
+        setInitializing(false)
+      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        // INITIAL_SESSION fires on page load, SIGNED_IN fires on login
         setSession({
           access_token: supaSession.access_token,
           refresh_token: supaSession.refresh_token,
           user: { id: supaSession.user.id, email: supaSession.user.email || '' }
         })
-        // Fetch teams from API
-        void fetchTeams(supaSession.access_token)
-      }
-      setInitializing(false)
-    })
-
-    // Listen for auth changes (handles token refresh automatically)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, supaSession) => {
-      if (event === 'SIGNED_OUT' || !supaSession) {
-        clearSession()
+        void fetchTeams(supaSession.access_token).finally(() => setInitializing(false))
       } else if (event === 'TOKEN_REFRESHED') {
         setSession({
           access_token: supaSession.access_token,
           refresh_token: supaSession.refresh_token,
           user: { id: supaSession.user.id, email: supaSession.user.email || '' }
         })
-      } else if (event === 'SIGNED_IN') {
-        setSession({
-          access_token: supaSession.access_token,
-          refresh_token: supaSession.refresh_token,
-          user: { id: supaSession.user.id, email: supaSession.user.email || '' }
-        })
-        void fetchTeams(supaSession.access_token)
       }
     })
 
