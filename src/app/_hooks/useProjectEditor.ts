@@ -134,10 +134,14 @@ export function useProjectEditor({
           name: repoName
         }
         if (gitBranch.trim()) repo.branch = gitBranch.trim()
+        const body: { repos: typeof repo[]; credentials?: { token: string } } = { repos: [repo] }
+        if (isPrivateRepo && gitToken) {
+          body.credentials = { token: gitToken }
+        }
         const response = await fetch(`/api/projects/${addToProjectId}/repos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ repos: [repo] })
+          body: JSON.stringify(body)
         })
         const data = (await response.json()) as { error?: string; message?: string }
         if (response.status === 401) {

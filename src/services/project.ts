@@ -475,7 +475,8 @@ export async function addReposToProject(
   projectId: string,
   teamId: string,
   repos: RepoInfo[],
-  gitProviderId?: string
+  gitProviderId?: string,
+  credentials?: { token: string }
 ): Promise<Project> {
   // Get existing project
   const { data: projectData, error: fetchError } = await supabase
@@ -511,7 +512,8 @@ export async function addReposToProject(
       branch,
       repoPath,
       gitProviderId || projectData.git_provider_id,
-      teamId
+      teamId,
+      credentials
     )
   }
 
@@ -606,7 +608,8 @@ async function cloneRepositoryToPath(
   branch: string,
   targetPath: string,
   gitProviderId: string | undefined,
-  teamId: string
+  teamId: string,
+  credentials?: { token: string }
 ): Promise<void> {
   let cloneUrl = gitUrl
   let hasAuth = false
@@ -624,6 +627,15 @@ async function cloneRepositoryToPath(
     } catch (err) {
       console.warn('Failed to get git provider:', err)
     }
+  }
+
+  // Fall back to manual credentials if provided
+  if (!hasAuth && credentials?.token) {
+    const url = new URL(gitUrl)
+    url.username = getAuthUsername(gitUrl)
+    url.password = credentials.token
+    cloneUrl = url.toString()
+    hasAuth = true
   }
 
   console.log(`Cloning ${gitUrl} (branch: ${branch}, auth: ${hasAuth ? 'yes' : 'no'})`)

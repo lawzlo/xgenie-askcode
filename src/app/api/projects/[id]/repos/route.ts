@@ -26,7 +26,10 @@ const AddReposSchema = z.object({
       })
     )
     .min(1),
-  gitProviderId: z.string().uuid().optional()
+  gitProviderId: z.string().uuid().optional(),
+  credentials: z.object({
+    token: z.string()
+  }).optional()
 })
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -56,7 +59,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       id,
       team.teamId!,
       parsed.data.repos,
-      parsed.data.gitProviderId
+      parsed.data.gitProviderId,
+      parsed.data.credentials
     )
     return jsonResponse(project)
   } catch (error) {
