@@ -92,7 +92,7 @@ export function useAuth({ showToast }: UseAuthParams) {
     setResetSuccess('')
   }, [])
 
-  const clearSession = useCallback(() => {
+  const clearSession = useCallback((reason?: 'expired' | 'logout') => {
     setSession(null)
     setTeams([])
     setCurrentTeamId(null)
@@ -113,7 +113,10 @@ export function useAuth({ showToast }: UseAuthParams) {
     localStorage.removeItem(STORAGE_KEYS.session)
     localStorage.removeItem(STORAGE_KEYS.teams)
     localStorage.removeItem(STORAGE_KEYS.currentTeam)
-  }, [])
+    if (reason === 'expired') {
+      showToast('Session expired. Please log in again.', 'error')
+    }
+  }, [showToast])
 
   const getAuthHeaders = useCallback((): Record<string, string> => {
     if (!session) return {}
@@ -125,6 +128,52 @@ export function useAuth({ showToast }: UseAuthParams) {
     }
     return headers
   }, [session, currentTeamId])
+
+  // Refresh session using refresh_token
+  const refreshSession = useCallback(async () => {
+    if (!session?.refresh_token) return false
+
+    try {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: session.refresh_token })
+      })
+
+      if (!response.ok) {
+        clearSession('expired')
+        return false
+      }
+
+      const data = await response.json() as {
+        session: { access_token: string; refresh_token: string }
+        user: { id: string; email: string }
+      }
+
+      const newSession: Session = {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        user: data.user
+      }
+      setSession(newSession)
+      localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(newSession))
+      return true
+    } catch {
+      clearSession()
+      return false
+    }
+  }, [session?.refresh_token, clearSession])
+
+  // Auto-refresh token every 50 minutes (JWT expires in 1 hour by default)
+  useEffect(() => {
+    if (!session?.refresh_token) return
+
+    const refreshInterval = setInterval(() => {
+      void refreshSession()
+    }, 50 * 60 * 1000) // 50 minutes
+
+    return () => clearInterval(refreshInterval)
+  }, [session?.refresh_token, refreshSession])
 
   useEffect(() => {
     return () => {

@@ -618,15 +618,8 @@ async function cloneRepositoryToPath(
   if (gitProviderId) {
     try {
       const provider = await getGitProvider(gitProviderId, teamId)
-      console.log(`Provider lookup: id=${gitProviderId}, found=${!!provider}, type=${provider?.provider}`)
       if (provider) {
-        const hasToken = !!provider.access_token
-        const hasGithubApp = haveGithubAppRequirements(provider)
-        console.log(`Provider auth: hasToken=${hasToken}, hasGithubApp=${hasGithubApp}`)
-        if (hasGithubApp) {
-          console.log(`GitHub App: appId=${provider.github_app_id}, hasKey=${!!provider.github_private_key}, installId=${provider.github_installation_id}`)
-        }
-        hasAuth = hasToken || hasGithubApp
+        hasAuth = !!(provider.access_token || haveGithubAppRequirements(provider))
         if (hasAuth) {
           cloneUrl = await getAuthenticatedCloneUrl(provider, gitUrl)
         }
@@ -634,12 +627,9 @@ async function cloneRepositoryToPath(
     } catch (err) {
       console.warn('Failed to get git provider:', err)
     }
-  } else {
-    console.log('No gitProviderId provided')
   }
 
   // Fall back to manual credentials if provided
-  console.log(`Manual credentials: provided=${!!credentials?.token}`)
   if (!hasAuth && credentials?.token) {
     const url = new URL(gitUrl)
     url.username = getAuthUsername(gitUrl)
