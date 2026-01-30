@@ -137,7 +137,7 @@ export function useAuth({ showToast }: UseAuthParams) {
         headers: { Authorization: `Bearer ${accessToken}` }
       })
       if (!response.ok) return
-      const data = (await response.json()) as { teams?: Team[] }
+      const data = (await response.json()) as { teams?: Team[]; joined_teams?: Team[] }
       const fetchedTeams = data.teams || []
       setTeams(fetchedTeams)
       localStorage.setItem(STORAGE_KEYS.teams, JSON.stringify(fetchedTeams))
@@ -151,6 +151,11 @@ export function useAuth({ showToast }: UseAuthParams) {
         setCurrentTeamId(nextTeamId)
         localStorage.setItem(STORAGE_KEYS.currentTeam, nextTeamId)
       }
+
+      // Show toast if user just joined teams via invite
+      if (data.joined_teams && data.joined_teams.length > 0) {
+        showToastRef.current(`Joined ${data.joined_teams.length} team(s)!`, 'success')
+      }
     } catch {
       // Ignore fetch errors
     }
@@ -158,30 +163,33 @@ export function useAuth({ showToast }: UseAuthParams) {
 
   // Initialize Supabase auth listener
   useEffect(() => {
-    // Listen for auth changes (handles token refresh automatically)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, supaSession) => {
       if (event === 'SIGNED_OUT' || !supaSession) {
         clearSession()
         setInitializing(false)
-      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-        // INITIAL_SESSION fires on page load, SIGNED_IN fires on login
-        setSession({
-          access_token: supaSession.access_token,
-          refresh_token: supaSession.refresh_token,
-          user: { id: supaSession.user.id, email: supaSession.user.email || '' }
-        })
+        return
+      }
+
+      // Update session for all authenticated events
+      setSession({
+        access_token: supaSession.access_token,
+        refresh_token: supaSession.refresh_token,
+        user: { id: supaSession.user.id, email: supaSession.user.email || '' }
+      })
+
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
         void fetchTeams(supaSession.access_token).finally(() => setInitializing(false))
-      } else if (event === 'TOKEN_REFRESHED') {
-        setSession({
-          access_token: supaSession.access_token,
-          refresh_token: supaSession.refresh_token,
-          user: { id: supaSession.user.id, email: supaSession.user.email || '' }
-        })
+      } else if (event === 'PASSWORD_RECOVERY') {
+        // User clicked password reset link in email
+        setInitializing(false)
+        openResetModal('Reset password')
+      } else {
+        setInitializing(false)
       }
     })
 
     return () => subscription.unsubscribe()
-  }, [clearSession, fetchTeams])
+  }, [clearSession, fetchTeams, openResetModal])
 
   useEffect(() => {
     return () => {
@@ -228,37 +236,12 @@ export function useAuth({ showToast }: UseAuthParams) {
 
     try {
       if (authMode === 'login') {
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email: authEmail,
           password: authPassword
         })
         if (error) throw error
-        if (!data.session || !data.user) throw new Error('Authentication failed')
-
-        // Fetch teams from API
-        const teamsResponse = await fetch('/api/teams', {
-          headers: { Authorization: `Bearer ${data.session.access_token}` }
-        })
-        const teamsData = (await teamsResponse.json()) as { teams?: Team[]; joined_teams?: Team[] }
-        const nextTeams = teamsData.teams || []
-
-        setTeams(nextTeams)
-        localStorage.setItem(STORAGE_KEYS.teams, JSON.stringify(nextTeams))
-
-        const storedTeamId = localStorage.getItem(STORAGE_KEYS.currentTeam)
-        const nextTeamId = storedTeamId && nextTeams.some(t => t.id === storedTeamId)
-          ? storedTeamId
-          : nextTeams[0]?.id || null
-
-        if (nextTeamId) {
-          setCurrentTeamId(nextTeamId)
-          localStorage.setItem(STORAGE_KEYS.currentTeam, nextTeamId)
-        }
-
-        if (teamsData.joined_teams && teamsData.joined_teams.length > 0) {
-          showToast(`Joined ${teamsData.joined_teams.length} team(s)!`, 'success')
-        }
-
+        // onAuthStateChange will handle session and teams
         closeAuthModal()
       } else {
         // Signup
@@ -275,21 +258,7 @@ export function useAuth({ showToast }: UseAuthParams) {
           return
         }
 
-        // Auto-confirmed, fetch teams
-        const teamsResponse = await fetch('/api/teams', {
-          headers: { Authorization: `Bearer ${data.session.access_token}` }
-        })
-        const teamsData = (await teamsResponse.json()) as { teams?: Team[] }
-        const nextTeams = teamsData.teams || []
-
-        setTeams(nextTeams)
-        localStorage.setItem(STORAGE_KEYS.teams, JSON.stringify(nextTeams))
-
-        if (nextTeams.length > 0) {
-          setCurrentTeamId(nextTeams[0].id)
-          localStorage.setItem(STORAGE_KEYS.currentTeam, nextTeams[0].id)
-        }
-
+        // Auto-confirmed - onAuthStateChange will handle session and teams
         closeAuthModal()
       }
     } catch (err) {
@@ -351,8 +320,8 @@ export function useAuth({ showToast }: UseAuthParams) {
   }
 
   async function handleLogout() {
+    // onAuthStateChange will handle clearSession via SIGNED_OUT event
     await supabase.auth.signOut()
-    clearSession('logout')
   }
 
   async function handleDeleteAccount(confirm: () => Promise<boolean>) {
@@ -370,9 +339,9 @@ export function useAuth({ showToast }: UseAuthParams) {
         throw new Error(data.error || 'Failed to delete account')
       }
 
-      await supabase.auth.signOut()
-      clearSession()
       showToast('Account deleted', 'success')
+      // onAuthStateChange will handle clearSession via SIGNED_OUT event
+      await supabase.auth.signOut()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete account'
       showToast(message, 'error')
