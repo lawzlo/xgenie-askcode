@@ -4,6 +4,8 @@
 
 AI-powered codebase Q&A. Ask questions about any Git repository in plain language.
 
+**[Try it free → askcode.xgenie.co](https://askcode.xgenie.co)**
+
 ## What is AskCode?
 
 AskCode lets you have conversations with codebases. Point it at a Git repository and ask questions like:
