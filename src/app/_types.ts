@@ -81,11 +81,6 @@ export type Toast = {
   duration: number
 }
 
-export type ResetSession = {
-  accessToken: string
-  refreshToken?: string
-}
-
 export type ProviderSelection = Record<
   string,
   { name: string; owner: string; repo: string; branch: string; defaultBranch: string }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AuthMode, ResetSession, Session, Team, ToastType } from '../_types'
+import type { AuthMode, Session, Team, ToastType } from '../_types'
 import { supabase } from '../_lib/supabase'
 
 const STORAGE_KEYS = {
@@ -32,7 +32,6 @@ export function useAuth({ showToast }: UseAuthParams) {
   const [forgotSuccess, setForgotSuccess] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
 
-  const [resetSession, setResetSession] = useState<ResetSession | null>(null)
   const [resetModalOpen, setResetModalOpen] = useState(false)
   const [resetTitle, setResetTitle] = useState('Set New Password')
   const [resetPassword, setResetPassword] = useState('')
@@ -109,7 +108,6 @@ export function useAuth({ showToast }: UseAuthParams) {
     setResetConfirm('')
     setResetError('')
     setResetSuccess('')
-    setResetSession(null)
     localStorage.removeItem(STORAGE_KEYS.teams)
     localStorage.removeItem(STORAGE_KEYS.currentTeam)
     if (reason === 'expired') {
@@ -324,7 +322,6 @@ export function useAuth({ showToast }: UseAuthParams) {
 
       setResetSuccess('Password updated! Redirecting...')
       resetTimerRef.current = window.setTimeout(() => {
-        setResetSession(null)
         closeResetModal()
       }, 2000)
     } catch (err) {
