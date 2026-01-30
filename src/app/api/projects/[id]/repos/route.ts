@@ -44,6 +44,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     const parsedBody = await parseJson<z.infer<typeof AddReposSchema>>(request)
     if (parsedBody.response) return parsedBody.response
 
+    console.log('Add repos request body:', JSON.stringify(parsedBody.data, null, 2))
+
     const parsed = AddReposSchema.safeParse(parsedBody.data)
     if (!parsed.success) {
       return jsonResponse({ error: 'Invalid request', details: parsed.error.errors }, 400)
