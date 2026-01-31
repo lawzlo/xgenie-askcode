@@ -137,24 +137,14 @@ npm run worker   # Run background job worker (clone/sync)
 
 ## Deployment
 
-AskCode requires two services that share a volume:
+AskCode runs as two services:
 
 | Service | Command | Purpose |
 |---------|---------|---------|
 | App | `npm start` | API server, handles requests |
 | Worker | `npm run worker` | Background jobs (clone/sync repos) |
 
-Both services **must share a volume** mounted at `/app/workspaces` (or your `WORKSPACE_ROOT` path). The worker clones repositories there, and the app reads them to answer questions.
-
-### Dokploy / Coolify
-
-1. Create two services from the same repo (Nixpacks auto-detected)
-2. App service: default command (`npm start`)
-3. Worker service: set command to `npm run worker`
-4. Create a **Volume Mount** in both services:
-   - Volume Name: `askcode-workspaces`
-   - Mount Path: `/app/workspaces`
-5. Set environment variables in both services
+**Important:** Both services must share a volume mounted at `/app/workspaces` (or your `WORKSPACE_ROOT` path). The worker clones repositories there, and the app reads them to answer questions.
 
 ### Docker Compose
 
@@ -167,7 +157,9 @@ services:
       - workspaces:/app/workspaces
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # ... other env vars
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
 
   worker:
     build: .
@@ -176,11 +168,22 @@ services:
       - workspaces:/app/workspaces
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # ... other env vars
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
 
 volumes:
   workspaces:
 ```
+
+### Other Platforms
+
+For any container platform (Kubernetes, Railway, Render, etc.):
+
+1. Deploy two services from the same image
+2. Set app command to `npm start`, worker command to `npm run worker`
+3. Mount a shared persistent volume to `/app/workspaces` in both
+4. Set the same environment variables in both services
 
 ### Requirements
 
