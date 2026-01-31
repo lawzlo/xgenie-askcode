@@ -36,6 +36,133 @@ export async function initWorkspaceRoot(): Promise<void> {
   await fs.mkdir(WORKSPACE_ROOT, { recursive: true })
 }
 
+export type ProjectJobType = 'clone' | 'sync' | 'add_repos'
+export type ProjectJobStatus = 'queued' | 'running' | 'success' | 'error'
+export type ProjectJob = {
+  id: string
+  project_id: string
+  team_id: string
+  type: ProjectJobType
+  status: ProjectJobStatus
+  payload: Record<string, unknown> | null
+  attempts: number
+  max_attempts: number
+}
+
+async function enqueueProjectJob(
+  projectId: string,
+  teamId: string,
+  type: ProjectJobType,
+  payload?: Record<string, unknown>
+): Promise<void> {
+  const { data: existing, error: existingError } = await supabase
+    .from('project_jobs')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('type', type)
+    .in('status', ['queued', 'running'])
+    .limit(1)
+
+  if (existingError) {
+    console.error('Failed to check existing jobs:', existingError)
+  }
+  if (existing && existing.length > 0) return
+
+  const { error } = await supabase
+    .from('project_jobs')
+    .insert({
+      project_id: projectId,
+      team_id: teamId,
+      type,
+      status: 'queued',
+      payload: payload || null
+    })
+
+  if (error) {
+    console.error('Failed to enqueue project job:', error)
+  }
+}
+
+async function updateSyncStatus(
+  projectId: string,
+  status: SyncStatus,
+  lastSyncedAt?: Date | null
+): Promise<void> {
+  const update: { sync_status: SyncStatus; last_synced_at?: string | null } = {
+    sync_status: status
+  }
+  if (status === 'ready' && lastSyncedAt) {
+    update.last_synced_at = lastSyncedAt.toISOString()
+  }
+  try {
+    await supabase.from('projects').update(update).eq('id', projectId)
+  } catch (err) {
+    console.error('Failed to update sync status:', err)
+  }
+}
+
+async function cloneProjectWorkspace(project: Project): Promise<void> {
+  await fs.mkdir(project.workspacePath, { recursive: true })
+
+  if (project.gitUrls && project.gitUrls.length > 0) {
+    for (const repo of project.gitUrls) {
+      const repoPath = path.join(project.workspacePath, repo.name)
+      await cloneRepositoryToPath(
+        repo.url,
+        repo.branch,
+        repoPath,
+        project.gitProviderId,
+        project.teamId,
+        project.credentials
+      )
+    }
+    return
+  }
+
+  await cloneRepository(project)
+}
+
+async function syncProjectWorkspace(
+  project: Project,
+  credentials?: { token: string }
+): Promise<void> {
+  if (credentials) {
+    project.credentials = credentials
+  }
+
+  if (project.gitUrls && project.gitUrls.length > 0) {
+    await fs.mkdir(project.workspacePath, { recursive: true })
+    for (const repo of project.gitUrls) {
+      const repoPath = path.join(project.workspacePath, repo.name)
+      try {
+        await fs.access(repoPath)
+        const git = simpleGit(repoPath)
+        await git.pull()
+        console.log(`Pulled ${repo.name} successfully`)
+      } catch {
+        console.log(`Repo ${repo.name} missing, cloning...`)
+        await cloneRepositoryToPath(
+          repo.url,
+          repo.branch,
+          repoPath,
+          project.gitProviderId,
+          project.teamId,
+          project.credentials
+        )
+      }
+    }
+    return
+  }
+
+  try {
+    await fs.access(project.workspacePath)
+    const git = createGitClient(project)
+    await git.pull()
+  } catch {
+    await cloneProjectWorkspace(project)
+  }
+}
+
 // Detect default branch from git URL using ls-remote
 async function detectDefaultBranch(gitUrl: string): Promise<string> {
   try {
@@ -73,7 +200,8 @@ export async function createProject(
       branch,
       workspace_path: workspacePath,
       git_provider_id: request.gitProviderId || null,
-      credentials: request.credentials ? { token: request.credentials.token } : null
+      credentials: request.credentials ? { token: request.credentials.token } : null,
+      sync_status: 'pending'
     })
     .select()
     .single()
@@ -97,27 +225,10 @@ export async function createProject(
     createdAt: new Date(data.created_at),
     gitProviderId: data.git_provider_id,
     credentials: request.credentials,
-    syncStatus: 'syncing'
+    syncStatus: 'pending'
   }
 
-  try {
-    // Clone the repository
-    await cloneRepository(project)
-
-    // Update last_synced_at and sync_status
-    await supabase
-      .from('projects')
-      .update({ last_synced_at: new Date().toISOString(), sync_status: 'ready' })
-      .eq('id', data.id)
-
-    project.lastSyncedAt = new Date()
-    project.syncStatus = 'ready'
-  } catch (cloneError) {
-    // Clean up if clone fails
-    await supabase.from('projects').delete().eq('id', data.id)
-    await fs.rm(workspacePath, { recursive: true, force: true })
-    throw cloneError
-  }
+  await enqueueProjectJob(project.id, teamId, 'clone')
 
   return project
 }
@@ -188,7 +299,8 @@ export async function listProjects(teamId: string): Promise<Project[]> {
       } catch {
         // Workspace missing, mark as pending and trigger sync
         project.syncStatus = 'pending'
-        void triggerBackgroundSync(project)
+        await updateSyncStatus(project.id, 'pending')
+        await enqueueProjectJob(project.id, project.teamId, 'sync')
       }
     }
   }
@@ -196,132 +308,28 @@ export async function listProjects(teamId: string): Promise<Project[]> {
   return projects
 }
 
-// Trigger background sync without blocking
-async function triggerBackgroundSync(project: Project): Promise<void> {
-  // Update status to syncing
-  await supabase
-    .from('projects')
-    .update({ sync_status: 'syncing' })
-    .eq('id', project.id)
-
-  console.log(`Starting background sync for project ${project.name}...`)
-
-  try {
-    if (project.gitUrls && project.gitUrls.length > 0) {
-      // Multi-repo project
-      await fs.mkdir(project.workspacePath, { recursive: true })
-      for (const repo of project.gitUrls) {
-        const repoPath = path.join(project.workspacePath, repo.name)
-        await cloneRepositoryToPath(
-          repo.url,
-          repo.branch,
-          repoPath,
-          project.gitProviderId,
-          project.teamId
-        )
-      }
-    } else {
-      // Single repo project - need to get credentials
-      await fs.mkdir(project.workspacePath, { recursive: true })
-      const git = simpleGit()
-
-      let cloneUrl = project.gitUrl
-
-      // Try git provider authentication first
-      if (project.gitProviderId) {
-        try {
-          const provider = await getGitProvider(project.gitProviderId, project.teamId)
-          if (provider) {
-            const hasAuth = provider.access_token || haveGithubAppRequirements(provider)
-            if (hasAuth) {
-              cloneUrl = await getAuthenticatedCloneUrl(provider, project.gitUrl)
-            }
-          }
-        } catch (err) {
-          console.warn('Failed to get git provider for background sync:', err)
-        }
-      }
-
-      // Fall back to stored credentials (manual add with token)
-      if (cloneUrl === project.gitUrl && project.credentials?.token) {
-        const url = new URL(project.gitUrl)
-        url.username = getAuthUsername(project.gitUrl)
-        url.password = project.credentials.token
-        cloneUrl = url.toString()
-      }
-
-      await git.clone(cloneUrl, project.workspacePath, ['--branch', project.branch, '--single-branch'])
-    }
-
-    // Update status to ready
-    await supabase
-      .from('projects')
-      .update({ last_synced_at: new Date().toISOString(), sync_status: 'ready' })
-      .eq('id', project.id)
-
-    console.log(`Background sync completed for project ${project.name}`)
-  } catch (err) {
-    console.error(`Background sync failed for project ${project.name}:`, err)
-    await supabase
-      .from('projects')
-      .update({ sync_status: 'error' })
-      .eq('id', project.id)
-  }
-}
-
 export async function syncProject(
   id: string,
   teamId: string,
-  credentials?: { username: string; token: string }
+  credentials?: { token: string }
 ): Promise<Project> {
   const project = await getProject(id, teamId)
   if (!project) {
     throw new Error(`Project not found: ${id}`)
   }
 
-  // Add credentials for pulling if provided
+  if (project.syncStatus === 'syncing' || project.syncStatus === 'pending') {
+    return project
+  }
+
   if (credentials) {
     project.credentials = credentials
   }
 
-  if (project.gitUrls && project.gitUrls.length > 0) {
-    // Multi-repo project: pull each repo
-    for (const repo of project.gitUrls) {
-      const repoPath = path.join(project.workspacePath, repo.name)
-      try {
-        await fs.access(repoPath)
-        const git = simpleGit(repoPath)
-        await git.pull()
-        console.log(`Pulled ${repo.name} successfully`)
-      } catch {
-        // Repo doesn't exist, clone it
-        console.log(`Repo ${repo.name} missing, cloning...`)
-        await cloneRepositoryToPath(
-          repo.url,
-          repo.branch,
-          repoPath,
-          project.gitProviderId,
-          project.teamId
-        )
-      }
-    }
-  } else {
-    // Single repo project
-    const git = createGitClient(project)
-    await git.pull()
-  }
+  await updateSyncStatus(project.id, 'pending')
+  project.syncStatus = 'pending'
+  await enqueueProjectJob(project.id, teamId, 'sync', credentials ? { credentials } : undefined)
 
-  const { error } = await supabase
-    .from('projects')
-    .update({ last_synced_at: new Date().toISOString(), sync_status: 'ready' })
-    .eq('id', id)
-
-  if (error) {
-    throw new Error(`Failed to update sync time: ${error.message}`)
-  }
-
-  project.lastSyncedAt = new Date()
-  project.syncStatus = 'ready'
   return project
 }
 
@@ -392,11 +400,11 @@ export async function createMultiRepoProject(
   const workspacePath = path.join(WORKSPACE_ROOT, `${teamId}_${Date.now()}`)
 
   // Store git_urls as JSON array with branch info
-  const gitUrls = request.repos.map(r => ({
-    url: r.gitUrl,
-    branch: r.branch,
-    name: r.name
-  }))
+  const gitUrls: { url: string; branch: string; name: string }[] = []
+  for (const repo of request.repos) {
+    const branch = repo.branch || await detectDefaultBranch(repo.gitUrl)
+    gitUrls.push({ url: repo.gitUrl, branch, name: repo.name })
+  }
 
   // Insert into database
   const { data, error } = await supabase
@@ -406,10 +414,11 @@ export async function createMultiRepoProject(
       team_id: teamId,
       name: request.name,
       git_url: request.repos[0]?.gitUrl || '',  // Primary URL for compatibility
-      branch: request.repos[0]?.branch || 'main',
+      branch: gitUrls[0]?.branch || 'main',
       git_urls: gitUrls,  // Store all repos
       workspace_path: workspacePath,
-      git_provider_id: request.gitProviderId || null
+      git_provider_id: request.gitProviderId || null,
+      sync_status: 'pending'
     })
     .select()
     .single()
@@ -432,40 +441,11 @@ export async function createMultiRepoProject(
     lastSyncedAt: null,
     createdAt: new Date(data.created_at),
     gitProviderId: data.git_provider_id,
-    syncStatus: 'syncing'
+    gitUrls,
+    syncStatus: 'pending'
   }
 
-  try {
-    // Create workspace directory
-    await fs.mkdir(workspacePath, { recursive: true })
-
-    // Clone all repositories (detect branch if not provided)
-    for (const repo of request.repos) {
-      const branch = repo.branch || await detectDefaultBranch(repo.gitUrl)
-      const repoPath = path.join(workspacePath, repo.name)
-      await cloneRepositoryToPath(
-        repo.gitUrl,
-        branch,
-        repoPath,
-        request.gitProviderId,
-        teamId
-      )
-    }
-
-    // Update last_synced_at and sync_status
-    await supabase
-      .from('projects')
-      .update({ last_synced_at: new Date().toISOString(), sync_status: 'ready' })
-      .eq('id', data.id)
-
-    project.lastSyncedAt = new Date()
-    project.syncStatus = 'ready'
-  } catch (cloneError) {
-    // Clean up if clone fails
-    await supabase.from('projects').delete().eq('id', data.id)
-    await fs.rm(workspacePath, { recursive: true, force: true })
-    throw cloneError
-  }
+  await enqueueProjectJob(project.id, teamId, 'clone')
 
   return project
 }
@@ -527,7 +507,7 @@ export async function addReposToProject(
     .from('projects')
     .update({
       git_urls: newGitUrls,
-      last_synced_at: new Date().toISOString()
+      sync_status: 'pending'
     })
     .eq('id', projectId)
     .eq('team_id', teamId)
@@ -541,6 +521,14 @@ export async function addReposToProject(
   if (!project) {
     throw new Error('Failed to get updated project')
   }
+
+  await enqueueProjectJob(project.id, teamId, 'add_repos', {
+    repos: reposWithBranch,
+    gitProviderId: gitProviderId || project.gitProviderId,
+    credentials: credentials ? { token: credentials.token } : undefined
+  })
+
+  project.syncStatus = 'pending'
   return project
 }
 
@@ -650,28 +638,54 @@ async function cloneRepositoryToPath(
   }
 }
 
-// Clone repository in background and update project status
-async function cloneInBackground(
-  projectId: string,
-  gitUrl: string,
-  branch: string,
-  workspacePath: string
-): Promise<void> {
-  try {
-    await fs.mkdir(workspacePath, { recursive: true })
-    const git = simpleGit()
-    await git.clone(gitUrl, workspacePath, ['--branch', branch, '--single-branch'])
+export async function processProjectJob(job: ProjectJob): Promise<void> {
+  const project = await getProject(job.project_id, job.team_id)
+  if (!project) {
+    throw new Error('Project not found')
+  }
 
-    await supabase
-      .from('projects')
-      .update({ last_synced_at: new Date().toISOString(), sync_status: 'ready' })
-      .eq('id', projectId)
+  const payload = job.payload && typeof job.payload === 'object' ? job.payload : {}
+  const credentials = (payload as { credentials?: { token?: string } }).credentials
+  const jobCredentials = credentials?.token ? { token: credentials.token } : undefined
+
+  await updateSyncStatus(project.id, 'syncing')
+
+  try {
+    switch (job.type) {
+      case 'clone':
+        await cloneProjectWorkspace(project)
+        break
+      case 'sync':
+        await syncProjectWorkspace(project, jobCredentials)
+        break
+      case 'add_repos': {
+        const repos = (payload as { repos?: RepoInfo[] }).repos || []
+        const providerId = (payload as { gitProviderId?: string }).gitProviderId
+        if (!Array.isArray(repos) || repos.length === 0) {
+          throw new Error('Job payload missing repos')
+        }
+        await fs.mkdir(project.workspacePath, { recursive: true })
+        for (const repo of repos) {
+          const repoPath = path.join(project.workspacePath, repo.name)
+          await cloneRepositoryToPath(
+            repo.gitUrl,
+            repo.branch || 'main',
+            repoPath,
+            providerId || project.gitProviderId,
+            project.teamId,
+            jobCredentials
+          )
+        }
+        break
+      }
+      default:
+        throw new Error(`Unknown job type: ${job.type}`)
+    }
+
+    await updateSyncStatus(project.id, 'ready', new Date())
   } catch (err) {
-    console.error(`Failed to clone demo project:`, err)
-    await supabase
-      .from('projects')
-      .update({ sync_status: 'error' })
-      .eq('id', projectId)
+    await updateSyncStatus(project.id, 'error')
+    throw err
   }
 }
 
@@ -714,7 +728,7 @@ export async function createDemoProject(
       git_url: DEMO_GIT_URL,
       branch: DEMO_BRANCH,
       workspace_path: workspacePath,
-      sync_status: 'syncing'
+      sync_status: 'pending'
     })
     .select()
     .single()
@@ -723,8 +737,7 @@ export async function createDemoProject(
     throw new Error(`Failed to create demo project: ${error.message}`)
   }
 
-  // Clone in background (don't wait)
-  cloneInBackground(data.id, DEMO_GIT_URL, DEMO_BRANCH, workspacePath)
+  await enqueueProjectJob(data.id, teamId, 'clone')
 
   return {
     id: data.id,
@@ -736,6 +749,6 @@ export async function createDemoProject(
     workspacePath: data.workspace_path,
     lastSyncedAt: null,
     createdAt: new Date(data.created_at),
-    syncStatus: 'syncing'
+    syncStatus: 'pending'
   }
 }

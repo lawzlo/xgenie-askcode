@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { apiRequest } from '../_lib/api'
 
 type SavedConversation = {
   id: string
@@ -26,14 +27,10 @@ export function useSaved({ getAuthHeaders, showToast }: UseSavedProps) {
   const loadSaved = useCallback(async () => {
     setSavedLoading(true)
     try {
-      const response = await fetch('/api/saved-conversations', {
+      const data = await apiRequest<SavedConversation[]>('/api/saved-conversations', {
         headers: getAuthHeaders()
       })
-
-      if (response.ok) {
-        const data = await response.json()
-        setSaved(data)
-      }
+      setSaved(data)
     } catch (err) {
       console.error('Failed to load saved:', err)
     } finally {
@@ -55,17 +52,12 @@ export function useSaved({ getAuthHeaders, showToast }: UseSavedProps) {
   const handleUnsave = useCallback(
     async (id: string) => {
       try {
-        const response = await fetch(`/api/saved-conversations/${id}`, {
+        await apiRequest(`/api/saved-conversations/${id}`, {
           method: 'DELETE',
           headers: getAuthHeaders()
         })
-
-        if (response.ok) {
-          setSaved((prev) => prev.filter((s) => s.id !== id))
-          showToast('Removed from saved', 'success')
-        } else {
-          showToast('Failed to unsave', 'error')
-        }
+        setSaved((prev) => prev.filter((s) => s.id !== id))
+        showToast('Removed from saved', 'success')
       } catch (err) {
         console.error('Failed to unsave:', err)
         showToast('Failed to unsave', 'error')

@@ -14,6 +14,8 @@ type UseProjectsParams = {
   showToast: (message: string, type?: ToastType, duration?: number) => void
   showConfirm: (message: string) => Promise<boolean>
   loadProviders: () => Promise<void>
+  initialProjectId?: string | null
+  onSelectedProjectChange?: (projectId: string | null) => void
 }
 
 export function useProjects({
@@ -23,7 +25,9 @@ export function useProjects({
   clearSession,
   showToast,
   showConfirm,
-  loadProviders
+  loadProviders,
+  initialProjectId,
+  onSelectedProjectChange
 }: UseProjectsParams) {
   const list = useProjectList({
     session,
@@ -41,7 +45,9 @@ export function useProjects({
     getAuthHeaders,
     clearSession,
     showToast,
-    showConfirm
+    showConfirm,
+    initialProjectId,
+    onSelectedProjectChange
   })
 
   const editor = useProjectEditor({

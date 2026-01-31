@@ -13,6 +13,7 @@ export type Team = {
   id: string
   name: string
   owner_id: string
+  access_level?: number
 }
 
 export type TeamMember = {

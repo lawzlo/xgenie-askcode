@@ -44,6 +44,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!project) {
       return jsonResponse({ error: 'Project not found' }, 404)
     }
+    if (project.syncStatus !== 'ready') {
+      return jsonResponse({ error: 'Project is still syncing. Please try again shortly.' }, 409)
+    }
 
     console.log(
       `[Ask] User: ${auth.user!.email}, Project: ${project.name}, Question: ${parsed.data.question}`

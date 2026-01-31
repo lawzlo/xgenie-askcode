@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { Session, Team, TeamInvite, TeamMember, ToastType } from '../_types'
+import { apiRequest } from '../_lib/api'
 
 type UseTeamsParams = {
   session: Session | null
@@ -41,9 +42,9 @@ export function useTeams({
     if (!session || !currentTeam) return 60
     // Owner always has full access
     if (currentTeam.owner_id === session.user.id) return 100
-    // Find member's access level from loaded members (if available)
+    // Prefer access level from teams list, fall back to loaded members if available
     const member = teamMembers.find((m) => m.user_id === session.user.id)
-    return member?.access_level ?? 60
+    return currentTeam.access_level ?? member?.access_level ?? 60
   }, [session, currentTeam, teamMembers])
 
   const closeTeamModal = useCallback(() => {
@@ -58,17 +59,15 @@ export function useTeams({
         return
       }
       try {
-        const response = await fetch(`/api/teams/${teamId}/members`, { headers })
-        if (response.status === 401) {
-          clearSession()
-          return
-        }
-        if (!response.ok) {
-          throw new Error('Failed to load team members')
-        }
-        const data = (await response.json()) as TeamMember[]
+        const data = await apiRequest<TeamMember[]>(`/api/teams/${teamId}/members`, {
+          headers,
+          onUnauthorized: clearSession
+        })
         setTeamMembers(data)
       } catch (err) {
+        if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+          return
+        }
         const message = err instanceof Error ? err.message : 'Failed to load team members'
         showToast(message, 'error')
       }
@@ -78,25 +77,25 @@ export function useTeams({
 
   async function loadTeamInvites(teamId: string) {
     try {
-      const response = await fetch(`/api/teams/${teamId}/invites`, { headers: getAuthHeaders() })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to load invites')
-      }
-      const data = (await response.json()) as TeamInvite[]
+      const data = await apiRequest<TeamInvite[]>(`/api/teams/${teamId}/invites`, {
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
+      })
       setTeamInvites(data)
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to load invites'
       showToast(message, 'error')
     }
   }
 
   async function openTeamModal() {
-    if (!currentTeamId) return
+    if (!currentTeamId || !session) return
     setTeamNameInput(currentTeam?.name || '')
+    setTeamMembers([])
+    setTeamInvites([])
     setTeamModalOpen(true)
     await loadTeamMembers(currentTeamId)
     if (session && currentTeam && currentTeam.owner_id === session.user.id) {
@@ -112,18 +111,12 @@ export function useTeams({
     if (!name) return
 
     try {
-      const response = await fetch(`/api/teams/${currentTeamId}`, {
+      await apiRequest(`/api/teams/${currentTeamId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ name })
+        headers: getAuthHeaders(),
+        body: { name },
+        onUnauthorized: clearSession
       })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to update team')
-      }
 
       setTeams((prev) => {
         const nextTeams = prev.map((team) =>
@@ -134,6 +127,9 @@ export function useTeams({
       })
       showToast('Team name updated', 'success')
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to update team'
       showToast(message, 'error')
     }
@@ -146,24 +142,20 @@ export function useTeams({
     if (!email) return
 
     try {
-      const response = await fetch(`/api/teams/${currentTeamId}/invites`, {
+      await apiRequest(`/api/teams/${currentTeamId}/invites`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ email })
+        headers: getAuthHeaders(),
+        body: { email },
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as { error?: string }
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to invite member')
-      }
 
       setInviteEmail('')
       showToast('Invite sent!', 'success')
       await loadTeamInvites(currentTeamId)
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to invite member'
       showToast(message, 'error')
     }
@@ -172,19 +164,16 @@ export function useTeams({
   async function handleCancelInvite(inviteId: string) {
     if (!currentTeamId) return
     try {
-      const response = await fetch(`/api/teams/${currentTeamId}/invites/${inviteId}`, {
+      await apiRequest(`/api/teams/${currentTeamId}/invites/${inviteId}`, {
         method: 'DELETE',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
       })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to cancel invite')
-      }
       await loadTeamInvites(currentTeamId)
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to cancel invite'
       showToast(message, 'error')
     }
@@ -195,19 +184,16 @@ export function useTeams({
     const confirmed = await showConfirm('Remove this member?')
     if (!confirmed) return
     try {
-      const response = await fetch(`/api/teams/${currentTeamId}/members/${userId}`, {
+      await apiRequest(`/api/teams/${currentTeamId}/members/${userId}`, {
         method: 'DELETE',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
       })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to remove member')
-      }
       await loadTeamMembers(currentTeamId)
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to remove member'
       showToast(message, 'error')
     }
@@ -216,47 +202,30 @@ export function useTeams({
   async function handleUpdateAccessLevel(userId: string, accessLevel: number) {
     if (!currentTeamId) return
     try {
-      const response = await fetch(`/api/teams/${currentTeamId}/members/${userId}`, {
+      await apiRequest(`/api/teams/${currentTeamId}/members/${userId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({ accessLevel })
+        headers: getAuthHeaders(),
+        body: { accessLevel },
+        onUnauthorized: clearSession
       })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to update access level')
-      }
       // Update local state immediately for responsiveness
       setTeamMembers((prev) =>
         prev.map((m) => (m.user_id === userId ? { ...m, access_level: accessLevel } : m))
       )
       showToast('Access level updated', 'success')
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to update access level'
       showToast(message, 'error')
     }
   }
 
-  useEffect(() => {
-    if (!session || !currentTeamId) {
-      setTeamModalOpen(false)
-      setTeamNameInput('')
-      setTeamMembers([])
-      setTeamInvites([])
-      setInviteEmail('')
-    } else {
-      // Load team members to get current user's access level
-      void loadTeamMembers(currentTeamId)
-    }
-  }, [session, currentTeamId, loadTeamMembers])
+  const teamModalVisible = !!(session && currentTeamId && teamModalOpen)
 
   return {
-    teamModalOpen,
+    teamModalOpen: teamModalVisible,
     teamNameInput,
     teamMembers,
     teamInvites,

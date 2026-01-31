@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Project, Session, ToastType } from '../_types'
+import { apiRequest } from '../_lib/api'
 
 type UseProjectListParams = {
   session: Session | null
@@ -30,11 +31,8 @@ export function useProjectList({
   useEffect(() => {
     async function checkDemo() {
       try {
-        const response = await fetch('/api/projects/demo')
-        if (response.ok) {
-          const data = await response.json()
-          setDemoAvailable(data.available === true)
-        }
+        const data = await apiRequest<{ available?: boolean }>('/api/projects/demo')
+        setDemoAvailable(data.available === true)
       } catch {
         setDemoAvailable(false)
       }
@@ -46,17 +44,15 @@ export function useProjectList({
     if (!session || !currentTeamId) return
     if (!silent) setProjectsLoading(true)
     try {
-      const response = await fetch('/api/projects', { headers: getAuthHeaders() })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to load projects')
-      }
-      const data = (await response.json()) as Project[]
+      const data = await apiRequest<Project[]>('/api/projects', {
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
+      })
       setProjects(data)
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       if (!silent) {
         const message = err instanceof Error ? err.message : 'Failed to load projects'
         showToast(message, 'error')
@@ -101,19 +97,16 @@ export function useProjectList({
   const handleSyncProject = useCallback(
     async (projectId: string) => {
       try {
-        const response = await fetch(`/api/projects/${projectId}/sync`, {
+        await apiRequest(`/api/projects/${projectId}/sync`, {
           method: 'POST',
-          headers: getAuthHeaders()
+          headers: getAuthHeaders(),
+          onUnauthorized: clearSession
         })
-        if (response.status === 401) {
-          clearSession()
-          return
-        }
-        if (!response.ok) {
-          throw new Error('Failed to sync project')
-        }
         await loadProjects()
       } catch (err) {
+        if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+          return
+        }
         const message = err instanceof Error ? err.message : 'Failed to sync project'
         showToast(message, 'error')
       }
@@ -126,20 +119,17 @@ export function useProjectList({
       const confirmed = await showConfirm('Delete this project?')
       if (!confirmed) return false
       try {
-        const response = await fetch(`/api/projects/${projectId}`, {
+        await apiRequest(`/api/projects/${projectId}`, {
           method: 'DELETE',
-          headers: getAuthHeaders()
+          headers: getAuthHeaders(),
+          onUnauthorized: clearSession
         })
-        if (response.status === 401) {
-          clearSession()
-          return false
-        }
-        if (!response.ok) {
-          throw new Error('Failed to delete project')
-        }
         setProjects((prev) => prev.filter((project) => project.id !== projectId))
         return true
       } catch (err) {
+        if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+          return false
+        }
         const message = err instanceof Error ? err.message : 'Failed to delete project'
         showToast(message, 'error')
         return false
@@ -152,24 +142,21 @@ export function useProjectList({
     if (!session || !currentTeamId) return
     setDemoLoading(true)
     try {
-      const response = await fetch('/api/projects/demo', {
+      await apiRequest('/api/projects/demo', {
         method: 'POST',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
       })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (response.status === 409) {
-        showToast('Demo project already exists', 'error')
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to create demo project')
-      }
       showToast('Demo project created!', 'success')
       await loadProjects()
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 409) {
+        showToast('Demo project already exists', 'error')
+        return
+      }
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to create demo project'
       showToast(message, 'error')
     } finally {

@@ -10,6 +10,7 @@ import type {
   ToastType
 } from '../_types'
 import { extractRepoName } from '../_lib/utils'
+import { apiRequest } from '../_lib/api'
 
 type UseProjectEditorParams = {
   session: Session | null
@@ -138,19 +139,12 @@ export function useProjectEditor({
         if (isPrivateRepo && gitToken) {
           body.credentials = { token: gitToken }
         }
-        const response = await fetch(`/api/projects/${addToProjectId}/repos`, {
+        await apiRequest(`/api/projects/${addToProjectId}/repos`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify(body)
+          headers: getAuthHeaders(),
+          body,
+          onUnauthorized: clearSession
         })
-        const data = (await response.json()) as { error?: string; message?: string }
-        if (response.status === 401) {
-          clearSession()
-          return
-        }
-        if (!response.ok) {
-          throw new Error(data.error || data.message || 'Failed to add repo')
-        }
         showToast('Repository added to project', 'success')
       } else {
         if (!projectName.trim()) {
@@ -172,24 +166,20 @@ export function useProjectEditor({
             token: gitToken
           }
         }
-        const response = await fetch('/api/projects', {
+        await apiRequest('/api/projects', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify(body)
+          headers: getAuthHeaders(),
+          body,
+          onUnauthorized: clearSession
         })
-        const data = (await response.json()) as { error?: string; message?: string }
-        if (response.status === 401) {
-          clearSession()
-          return
-        }
-        if (!response.ok) {
-          throw new Error(data.error || data.message || 'Failed to add project')
-        }
       }
 
       closeAddProjectModal()
       await loadProjects()
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to add project'
       showToast(message, 'error')
     } finally {
@@ -204,20 +194,15 @@ export function useProjectEditor({
     }
     setProviderReposLoading(true)
     try {
-      const response = await fetch(`/api/git-providers/${providerId}/repos`, {
-        headers: getAuthHeaders()
+      const data = await apiRequest<ProviderRepo[]>(`/api/git-providers/${providerId}/repos`, {
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as ProviderRepo[] | { error?: string }
-      if (response.status === 401) {
-        clearSession()
+      setProviderRepos(Array.isArray(data) ? data : [])
+    } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
         return
       }
-      if (!response.ok || !Array.isArray(data)) {
-        const message = !Array.isArray(data) ? data.error : 'Failed to load repositories'
-        throw new Error(message || 'Failed to load repositories')
-      }
-      setProviderRepos(data)
-    } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load repositories'
       showToast(message, 'error')
       setProviderRepos([])
@@ -241,18 +226,10 @@ export function useProjectEditor({
     const key = `${owner}/${repo}`
     if (branchCache[key]) return
     try {
-      const response = await fetch(
+      const data = await apiRequest<string[]>(
         `/api/git-providers/${providerId}/repos/${owner}/${repo}/branches`,
-        { headers: getAuthHeaders() }
+        { headers: getAuthHeaders(), onUnauthorized: clearSession }
       )
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to load branches')
-      }
-      const data = (await response.json()) as string[]
       setBranchCache((prev) => ({ ...prev, [key]: data }))
     } catch {
       setBranchCache((prev) => ({ ...prev, [key]: [fallback] }))
@@ -315,46 +292,28 @@ export function useProjectEditor({
     setAddProjectLoading(true)
     try {
       if (providerAddToProjectId) {
-        const response = await fetch(`/api/projects/${providerAddToProjectId}/repos`, {
+        await apiRequest(`/api/projects/${providerAddToProjectId}/repos`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({
-            repos,
-            gitProviderId: providerSelectId
-          })
+          headers: getAuthHeaders(),
+          body: { repos, gitProviderId: providerSelectId },
+          onUnauthorized: clearSession
         })
-        const data = (await response.json()) as { error?: string; message?: string }
-        if (response.status === 401) {
-          clearSession()
-          return
-        }
-        if (!response.ok) {
-          throw new Error(data.error || data.message || 'Failed to add repos')
-        }
         showToast(`Added ${repos.length} repo(s) to project`, 'success')
       } else {
-        const response = await fetch('/api/projects/multi', {
+        await apiRequest('/api/projects/multi', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({
-            name: projectName.trim(),
-            repos,
-            gitProviderId: providerSelectId
-          })
+          headers: getAuthHeaders(),
+          body: { name: projectName.trim(), repos, gitProviderId: providerSelectId },
+          onUnauthorized: clearSession
         })
-        const data = (await response.json()) as { error?: string; message?: string }
-        if (response.status === 401) {
-          clearSession()
-          return
-        }
-        if (!response.ok) {
-          throw new Error(data.error || data.message || 'Failed to create project')
-        }
         showToast('Project created successfully', 'success')
       }
       closeAddProjectModal()
       await loadProjects()
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to add repos'
       showToast(message, 'error')
     } finally {
@@ -364,15 +323,10 @@ export function useProjectEditor({
 
   async function openEditProjectModal(projectId: string) {
     try {
-      const response = await fetch(`/api/projects/${projectId}`, { headers: getAuthHeaders() })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to load project')
-      }
-      const data = (await response.json()) as Project
+      const data = await apiRequest<Project>(`/api/projects/${projectId}`, {
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
+      })
       setEditingProject(data)
       setEditProjectModalOpen(true)
       setEditTab('manual')
@@ -382,6 +336,9 @@ export function useProjectEditor({
       setEditSelectedRepos({})
       await loadProviders()
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to load project'
       showToast(message, 'error')
     }
@@ -405,23 +362,18 @@ export function useProjectEditor({
     const confirmed = await showConfirm('Remove this repository from the project?')
     if (!confirmed) return
     try {
-      const response = await fetch(`/api/projects/${editingProject.id}/repos`, {
+      const data = await apiRequest<Project>(`/api/projects/${editingProject.id}/repos`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ repoUrl })
+        headers: getAuthHeaders(),
+        body: { repoUrl },
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as Project | { error?: string }
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok || !('id' in data)) {
-        const message = 'error' in data ? data.error : 'Failed to remove repo'
-        throw new Error(message || 'Failed to remove repo')
-      }
       setEditingProject(data)
       showToast('Repository removed', 'success')
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to remove repo'
       showToast(message, 'error')
     }
@@ -441,28 +393,21 @@ export function useProjectEditor({
       return
     }
     try {
-      const response = await fetch(`/api/projects/${editingProject.id}/repos`, {
+      const data = await apiRequest<Project>(`/api/projects/${editingProject.id}/repos`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          repos: [{ gitUrl: url, branch, name }]
-        })
+        headers: getAuthHeaders(),
+        body: { repos: [{ gitUrl: url, branch, name }] },
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as Project | { error?: string }
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok || !('id' in data)) {
-        const message = 'error' in data ? data.error : 'Failed to add repo'
-        throw new Error(message || 'Failed to add repo')
-      }
       setEditingProject(data)
       setEditGitUrl('')
       setEditBranch('')
       setEditName('')
       showToast('Repository added', 'success')
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to add repo'
       showToast(message, 'error')
     }
@@ -474,20 +419,15 @@ export function useProjectEditor({
       return
     }
     try {
-      const response = await fetch(`/api/git-providers/${providerId}/repos`, {
-        headers: getAuthHeaders()
+      const data = await apiRequest<ProviderRepo[]>(`/api/git-providers/${providerId}/repos`, {
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as ProviderRepo[] | { error?: string }
-      if (response.status === 401) {
-        clearSession()
+      setEditProviderRepos(Array.isArray(data) ? data : [])
+    } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
         return
       }
-      if (!response.ok || !Array.isArray(data)) {
-        const message = !Array.isArray(data) ? data.error : 'Failed to load repositories'
-        throw new Error(message || 'Failed to load repositories')
-      }
-      setEditProviderRepos(data)
-    } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load repositories'
       showToast(message, 'error')
       setEditProviderRepos([])
@@ -548,30 +488,19 @@ export function useProjectEditor({
     }))
 
     try {
-      const response = await fetch(`/api/projects/${editingProject.id}/repos`, {
+      const data = await apiRequest<Project>(`/api/projects/${editingProject.id}/repos`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          repos,
-          gitProviderId: editProviderId
-        })
+        headers: getAuthHeaders(),
+        body: { repos, gitProviderId: editProviderId },
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as Project | { error?: string; message?: string }
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        const errorData = data as { error?: string; message?: string }
-        throw new Error(errorData.error || errorData.message || 'Failed to add repos')
-      }
-      if (!('id' in data)) {
-        throw new Error('Failed to add repos')
-      }
       setEditingProject(data)
       setEditSelectedRepos({})
       showToast(`Added ${repos.length} repo(s)`, 'success')
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to add repos'
       showToast(message, 'error')
     }

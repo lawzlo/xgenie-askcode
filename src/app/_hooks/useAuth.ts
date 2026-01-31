@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuthMode, Session, Team, ToastType } from '../_types'
 import { supabase } from '../_lib/supabase'
+import { apiRequest } from '../_lib/api'
 
 const STORAGE_KEYS = {
   teams: 'askcode_teams',
@@ -133,11 +134,9 @@ export function useAuth({ showToast }: UseAuthParams) {
   // Fetch teams from API and update state
   const fetchTeams = useCallback(async (accessToken: string) => {
     try {
-      const response = await fetch('/api/teams', {
+      const data = await apiRequest<{ teams?: Team[]; joined_teams?: Team[] }>('/api/teams', {
         headers: { Authorization: `Bearer ${accessToken}` }
       })
-      if (!response.ok) return
-      const data = (await response.json()) as { teams?: Team[]; joined_teams?: Team[] }
       const fetchedTeams = data.teams || []
       setTeams(fetchedTeams)
       localStorage.setItem(STORAGE_KEYS.teams, JSON.stringify(fetchedTeams))
@@ -213,7 +212,9 @@ export function useAuth({ showToast }: UseAuthParams) {
     if (connected || error) {
       url.searchParams.delete('provider_connected')
       url.searchParams.delete('error')
-      window.history.replaceState({}, '', url.pathname)
+      const nextSearch = url.searchParams.toString()
+      const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash}`
+      window.history.replaceState({}, '', nextUrl)
     }
   }, [showToast])
 
@@ -329,16 +330,10 @@ export function useAuth({ showToast }: UseAuthParams) {
     if (!confirmed) return
 
     try {
-      const response = await fetch('/api/auth/delete-account', {
+      await apiRequest('/api/auth/delete-account', {
         method: 'DELETE',
         headers: getAuthHeaders()
       })
-
-      if (!response.ok) {
-        const data = (await response.json()) as { error?: string }
-        throw new Error(data.error || 'Failed to delete account')
-      }
-
       showToast('Account deleted', 'success')
       // onAuthStateChange will handle clearSession via SIGNED_OUT event
       await supabase.auth.signOut()

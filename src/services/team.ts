@@ -5,6 +5,7 @@ export interface Team {
   name: string
   owner_id: string
   created_at: string
+  access_level?: number
 }
 
 export interface TeamMember {
@@ -48,13 +49,19 @@ export async function getUserTeams(userId: string): Promise<Team[]> {
   // Get teams user is a member of
   const { data: memberTeams, error: memberError } = await supabase
     .from('team_members')
-    .select('team_id')
+    .select('team_id, access_level')
     .eq('user_id', userId)
 
   if (memberError) throw memberError
 
+  const ownedTeamIds = new Set((ownedTeams || []).map(team => team.id))
+  const ownedWithAccess = (ownedTeams || []).map(team => ({
+    ...team,
+    access_level: 100
+  }))
+
   if (memberTeams.length === 0) {
-    return ownedTeams || []
+    return ownedWithAccess
   }
 
   const memberTeamIds = memberTeams.map(m => m.team_id)
@@ -65,7 +72,15 @@ export async function getUserTeams(userId: string): Promise<Team[]> {
 
   if (teamsError) throw teamsError
 
-  return [...(ownedTeams || []), ...(teams || [])]
+  const accessMap = new Map(memberTeams.map(m => [m.team_id, m.access_level ?? 60]))
+  const memberWithAccess = (teams || [])
+    .filter(team => !ownedTeamIds.has(team.id))
+    .map(team => ({
+      ...team,
+      access_level: accessMap.get(team.id) ?? 60
+    }))
+
+  return [...ownedWithAccess, ...memberWithAccess]
 }
 
 // Get a single team

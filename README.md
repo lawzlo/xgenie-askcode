@@ -51,6 +51,9 @@ cp .env.example .env
 
 # Run database migrations and start dev server
 npm run dev
+
+# In another terminal, run the background job worker
+npm run worker
 ```
 
 ### Environment Variables
@@ -129,6 +132,7 @@ npm start        # Start production server
 npm run lint     # Run ESLint
 npm run typecheck# TypeScript type check
 npm run migrate  # Run migrations manually
+npm run worker   # Run background job worker (clone/sync)
 ```
 
 ## Deployment
@@ -138,6 +142,8 @@ AskCode can be deployed anywhere that runs Node.js:
 - **Dokploy/Coolify** - Use Nixpacks (auto-detected)
 - **Docker** - Build with `docker build -t askcode .`
 - **Vercel/Railway** - Connect your repo
+
+Background sync/clone runs in a separate worker process. In Dokploy/Coolify, add a second service using the same image and set the command to `npm run worker`. Make sure both services share the same `WORKSPACE_ROOT` volume.
 
 Make sure to:
 1. Set all required environment variables

@@ -19,10 +19,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (team.response) return team.response
 
     const project = await syncProject(id, team.teamId!)
-    return jsonResponse({
-      ...project,
-      credentials: project.credentials ? { hasToken: true } : undefined
-    })
+    return jsonResponse(
+      {
+        ...project,
+        credentials: project.credentials ? { hasToken: true } : undefined
+      },
+      202
+    )
   } catch (error) {
     if (error instanceof Error && error.message.includes('not found')) {
       return jsonResponse({ error: 'Project not found' }, 404)

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { GitProvider, Session, ToastType } from '../_types'
+import { apiRequest } from '../_lib/api'
 
 type UseProvidersParams = {
   session: Session | null
@@ -59,17 +60,15 @@ export function useProviders({
     }
     setProvidersLoading(true)
     try {
-      const response = await fetch('/api/git-providers', { headers: getAuthHeaders() })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to load providers')
-      }
-      const data = (await response.json()) as GitProvider[]
+      const data = await apiRequest<GitProvider[]>('/api/git-providers', {
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
+      })
       setProviders(data)
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to load providers'
       showToast(message, 'error')
     } finally {
@@ -96,24 +95,17 @@ export function useProviders({
       return
     }
     try {
-      const response = await fetch('/api/git-providers/gitea', {
+      const data = await apiRequest<{ oauth_url?: string }>('/api/git-providers/gitea', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
+        headers: getAuthHeaders(),
+        body: {
           name: giteaName || 'Gitea',
           api_url: giteaUrl,
           client_id: giteaClientId,
           client_secret: giteaClientSecret
-        })
+        },
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as { oauth_url?: string; error?: string }
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to connect Gitea')
-      }
 
       if (data.oauth_url) {
         window.open(data.oauth_url, '_blank')
@@ -122,6 +114,9 @@ export function useProviders({
       showToast('Please complete authorization in the new window, then refresh this page.', 'info', 0)
       await loadProviders()
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to connect Gitea'
       showToast(message, 'error')
     }
@@ -133,24 +128,17 @@ export function useProviders({
       return
     }
     try {
-      const response = await fetch('/api/git-providers/github', {
+      const data = await apiRequest<{ install_url?: string }>('/api/git-providers/github', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
+        headers: getAuthHeaders(),
+        body: {
           name: githubName || 'GitHub',
           github_app_id: Number.parseInt(githubAppId, 10),
           github_app_name: githubAppName,
           github_private_key: githubPrivateKey
-        })
+        },
+        onUnauthorized: clearSession
       })
-      const data = (await response.json()) as { install_url?: string; error?: string }
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to connect GitHub')
-      }
       if (data.install_url) {
         window.open(data.install_url, '_blank')
       }
@@ -162,6 +150,9 @@ export function useProviders({
       showToast('Please install the GitHub App to your account, then refresh this page.', 'info', 0)
       await loadProviders()
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to connect GitHub'
       showToast(message, 'error')
     }
@@ -171,19 +162,16 @@ export function useProviders({
     const confirmed = await showConfirm('Remove this provider?')
     if (!confirmed) return
     try {
-      const response = await fetch(`/api/git-providers/${providerId}`, {
+      await apiRequest(`/api/git-providers/${providerId}`, {
         method: 'DELETE',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
       })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to delete provider')
-      }
       await loadProviders()
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to delete provider'
       showToast(message, 'error')
     }

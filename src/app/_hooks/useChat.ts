@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Message, Project, Session, ToastType } from '../_types'
+import { apiRequest } from '../_lib/api'
 
 type UseChatParams = {
   session: Session | null
@@ -11,6 +12,8 @@ type UseChatParams = {
   clearSession: () => void
   showToast: (message: string, type?: ToastType, duration?: number) => void
   showConfirm: (message: string) => Promise<boolean>
+  initialProjectId?: string | null
+  onSelectedProjectChange?: (projectId: string | null) => void
 }
 
 export function useChat({
@@ -20,7 +23,9 @@ export function useChat({
   getAuthHeaders,
   clearSession,
   showToast,
-  showConfirm
+  showConfirm,
+  initialProjectId,
+  onSelectedProjectChange
 }: UseChatParams) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [selectedProjectName, setSelectedProjectName] = useState('')
@@ -40,7 +45,8 @@ export function useChat({
     setSelectedProjectId(null)
     setSelectedProjectName('')
     setChatMessages([])
-  }, [session, currentTeamId])
+    if (onSelectedProjectChange) onSelectedProjectChange(null)
+  }, [session, currentTeamId, onSelectedProjectChange])
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -70,17 +76,15 @@ export function useChat({
       }
       setHistoryLoading(true)
       try {
-        const response = await fetch(`/api/ask/${projectId}/history`, { headers })
-        if (response.status === 401) {
-          clearSession()
-          return
-        }
-        if (!response.ok) {
-          throw new Error('Failed to load conversation history')
-        }
-        const data = (await response.json()) as { messages: Message[] }
+        const data = await apiRequest<{ messages: Message[] }>(`/api/ask/${projectId}/history`, {
+          headers,
+          onUnauthorized: clearSession
+        })
         setChatMessages(data.messages || [])
       } catch (err) {
+        if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+          return
+        }
         const message = err instanceof Error ? err.message : 'Failed to load conversation history'
         showToast(message, 'error')
       } finally {
@@ -100,18 +104,18 @@ export function useChat({
       setSuggestionsLoading(true)
       setQuestionSuggestions([])
       try {
-        const response = await fetch(`/api/projects/${projectId}/suggestions`, { headers })
-        if (response.ok) {
-          const data = (await response.json()) as { suggestions: string[] }
-          setQuestionSuggestions(data.suggestions || [])
-        }
+        const data = await apiRequest<{ suggestions: string[] }>(
+          `/api/projects/${projectId}/suggestions`,
+          { headers, onUnauthorized: clearSession }
+        )
+        setQuestionSuggestions(data.suggestions || [])
       } catch {
         // Silently fail - suggestions are optional
       } finally {
         setSuggestionsLoading(false)
       }
     },
-    [getAuthHeaders]
+    [clearSession, getAuthHeaders]
   )
 
   const handleSelectProject = useCallback(
@@ -121,11 +125,12 @@ export function useChat({
       setQuestionInput('')
       setChatMessages([])
       setQuestionSuggestions([])
+      if (onSelectedProjectChange) onSelectedProjectChange(project.id)
       await loadHistory(project.id)
       void loadSuggestions(project.id)
       questionInputRef.current?.focus()
     },
-    [loadHistory, loadSuggestions]
+    [loadHistory, loadSuggestions, onSelectedProjectChange]
   )
 
   const handleProjectDeleted = useCallback(
@@ -134,8 +139,9 @@ export function useChat({
       setSelectedProjectId(null)
       setSelectedProjectName('')
       setChatMessages([])
+      if (onSelectedProjectChange) onSelectedProjectChange(null)
     },
-    [selectedProjectId]
+    [onSelectedProjectChange, selectedProjectId]
   )
 
   const handleClearHistory = useCallback(async () => {
@@ -143,19 +149,16 @@ export function useChat({
     const confirmed = await showConfirm('Clear conversation history?')
     if (!confirmed) return
     try {
-      const response = await fetch(`/api/ask/${selectedProjectId}/history`, {
+      await apiRequest(`/api/ask/${selectedProjectId}/history`, {
         method: 'DELETE',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        onUnauthorized: clearSession
       })
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-      if (!response.ok) {
-        throw new Error('Failed to clear conversation history')
-      }
       setChatMessages([])
     } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to clear conversation history'
       showToast(message, 'error')
     }
@@ -185,32 +188,18 @@ export function useChat({
     abortControllerRef.current = new AbortController()
 
     try {
-      const response = await fetch(`/api/ask/${activeProjectId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({ question: trimmedQuestion }),
-        signal: abortControllerRef.current.signal
-      })
-
-      if (response.status === 401) {
-        clearSession()
-        return
-      }
-
-      if (!response.ok) {
-        const data = (await response.json()) as { message?: string }
-        throw new Error(data.message || 'Failed to get answer')
-      }
-
-      const data = (await response.json()) as {
+      const data = await apiRequest<{
         id?: string
         answer: string
         filesRead: string[]
         followUpSuggestions?: string[]
-      }
+      }>(`/api/ask/${activeProjectId}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: { question: trimmedQuestion },
+        signal: abortControllerRef.current.signal,
+        onUnauthorized: clearSession
+      })
       if (selectedProjectIdRef.current !== activeProjectId) return
 
       setChatMessages((prev) =>
@@ -231,6 +220,9 @@ export function useChat({
         await loadHistory(activeProjectId)
         return
       }
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Failed to get answer'
       showToast(message, 'error')
       await loadHistory(activeProjectId)
@@ -249,6 +241,24 @@ export function useChat({
     selectedProjectId,
     showToast
   ])
+
+  useEffect(() => {
+    if (!initialProjectId || initialProjectId === selectedProjectId) return
+    const project = projects.find((item) => item.id === initialProjectId)
+    if (project) {
+      void handleSelectProject(project)
+    }
+  }, [handleSelectProject, initialProjectId, projects, selectedProjectId])
+
+  useEffect(() => {
+    if (initialProjectId || !selectedProjectId) return
+    setSelectedProjectId(null)
+    setSelectedProjectName('')
+    setChatMessages([])
+    setQuestionInput('')
+    setQuestionSuggestions([])
+    if (onSelectedProjectChange) onSelectedProjectChange(null)
+  }, [initialProjectId, onSelectedProjectChange, selectedProjectId])
 
   const handleCancelAsk = useCallback(() => {
     if (abortControllerRef.current) {
