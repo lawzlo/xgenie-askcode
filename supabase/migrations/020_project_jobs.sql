@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS public.project_jobs (
   type TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'queued',
   payload JSONB,
+  error TEXT,
   attempts INTEGER NOT NULL DEFAULT 0,
   max_attempts INTEGER NOT NULL DEFAULT 3,
   run_after TIMESTAMPTZ NOT NULL DEFAULT now(),
