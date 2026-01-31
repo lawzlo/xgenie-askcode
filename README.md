@@ -4,6 +4,8 @@
 
 AI-powered codebase Q&A. Ask questions about any Git repository in plain language.
 
+https://github.com/user-attachments/assets/0dfdb571-dfb5-4a21-9324-fabff1e0a658
+
 **[Try it free → askcode.xgenie.co](https://askcode.xgenie.co)**
 
 ## What is AskCode?
