@@ -1,4 +1,5 @@
-# Nixpacks configuration for Dokploy
+# Nixpacks configuration
+# Cache bust: 2026-01-31-v2
 [phases.setup]
 nixPkgs = ["nodejs", "postgresql", "git"]
 
