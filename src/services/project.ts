@@ -64,7 +64,7 @@ async function enqueueProjectJob(
     .limit(1)
 
   if (existingError) {
-    console.error('Failed to check existing jobs:', existingError)
+    throw new Error(`Failed to check existing jobs: ${existingError.message}`)
   }
   if (existing && existing.length > 0) return
 
@@ -79,7 +79,7 @@ async function enqueueProjectJob(
     })
 
   if (error) {
-    console.error('Failed to enqueue project job:', error)
+    throw new Error(`Failed to enqueue project job: ${error.message}`)
   }
 }
 
@@ -94,10 +94,9 @@ async function updateSyncStatus(
   if (status === 'ready' && lastSyncedAt) {
     update.last_synced_at = lastSyncedAt.toISOString()
   }
-  try {
-    await supabase.from('projects').update(update).eq('id', projectId)
-  } catch (err) {
-    console.error('Failed to update sync status:', err)
+  const { error } = await supabase.from('projects').update(update).eq('id', projectId)
+  if (error) {
+    throw new Error(`Failed to update sync status: ${error.message}`)
   }
 }
 
@@ -567,10 +566,15 @@ export async function removeRepoFromProject(
   const newGitUrls = existingGitUrls.filter(r => r.url !== repoUrl)
 
   // Update primary git_url if we removed it
-  const updateData: { git_urls: DbRepoInfo[]; git_url?: string; branch?: string } = { git_urls: newGitUrls }
-  if (projectData.git_url === repoUrl && newGitUrls.length > 0) {
-    updateData.git_url = newGitUrls[0].url
-    updateData.branch = newGitUrls[0].branch
+  const updateData: { git_urls: DbRepoInfo[]; git_url?: string | null; branch?: string | null } = { git_urls: newGitUrls }
+  if (projectData.git_url === repoUrl) {
+    if (newGitUrls.length > 0) {
+      updateData.git_url = newGitUrls[0].url
+      updateData.branch = newGitUrls[0].branch
+    } else {
+      updateData.git_url = null
+      updateData.branch = null
+    }
   }
 
   const { error: updateError } = await supabase
