@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 type UpdateMode = 'replace' | 'push'
@@ -44,14 +44,35 @@ export function useUrlState() {
     [pathname, router]
   )
 
-  return {
-    projectId: searchParams.get('project'),
-    teamId: searchParams.get('team'),
-    modal: searchParams.get('modal') as ModalState | null,
-    editProjectId: searchParams.get('edit'),
-    setProjectId: (value: string | null, mode?: UpdateMode) => updateParam('project', value, mode),
-    setTeamId: (value: string | null, mode?: UpdateMode) => updateParam('team', value, mode),
-    setModal: (value: ModalState | null, mode?: UpdateMode) => updateParam('modal', value, mode),
-    setEditProjectId: (value: string | null, mode?: UpdateMode) => updateParam('edit', value, mode)
-  }
+  // Memoize setter functions to maintain stable references
+  const setProjectId = useCallback(
+    (value: string | null, mode?: UpdateMode) => updateParam('project', value, mode),
+    [updateParam]
+  )
+  const setTeamId = useCallback(
+    (value: string | null, mode?: UpdateMode) => updateParam('team', value, mode),
+    [updateParam]
+  )
+  const setModal = useCallback(
+    (value: ModalState | null, mode?: UpdateMode) => updateParam('modal', value, mode),
+    [updateParam]
+  )
+  const setEditProjectId = useCallback(
+    (value: string | null, mode?: UpdateMode) => updateParam('edit', value, mode),
+    [updateParam]
+  )
+
+  return useMemo(
+    () => ({
+      projectId: searchParams.get('project'),
+      teamId: searchParams.get('team'),
+      modal: searchParams.get('modal') as ModalState | null,
+      editProjectId: searchParams.get('edit'),
+      setProjectId,
+      setTeamId,
+      setModal,
+      setEditProjectId
+    }),
+    [searchParams, setProjectId, setTeamId, setModal, setEditProjectId]
+  )
 }
