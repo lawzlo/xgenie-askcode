@@ -137,50 +137,66 @@ npm run worker   # Run background job worker (clone/sync)
 
 ## Deployment
 
-AskCode can be deployed anywhere that runs Node.js:
+AskCode requires two services that share a volume:
 
-- **Dokploy/Coolify** - Use Nixpacks (auto-detected)
-- **Docker** - Build with `docker build -t askcode .`
-- **Vercel/Railway** - Connect your repo
+| Service | Command | Purpose |
+|---------|---------|---------|
+| App | `npm start` | API server, handles requests |
+| Worker | `npm run worker` | Background jobs (clone/sync repos) |
 
-Background sync/clone runs in a separate worker process. In Dokploy/Coolify, add a second service using the same image and set the command to `npm run worker`. Make sure both services share the same `WORKSPACE_ROOT` volume.
+Both services **must share a volume** mounted at `/app/workspaces` (or your `WORKSPACE_ROOT` path). The worker clones repositories there, and the app reads them to answer questions.
 
-Make sure to:
+### Dokploy / Coolify
+
+1. Create two services from the same repo (Nixpacks auto-detected)
+2. App service: default command (`npm start`)
+3. Worker service: set command to `npm run worker`
+4. Create a **Volume Mount** in both services:
+   - Volume Name: `askcode-workspaces`
+   - Mount Path: `/app/workspaces`
+5. Set environment variables in both services
+
+### Docker Compose
+
+```yaml
+services:
+  app:
+    build: .
+    command: npm start
+    volumes:
+      - workspaces:/app/workspaces
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # ... other env vars
+
+  worker:
+    build: .
+    command: npm run worker
+    volumes:
+      - workspaces:/app/workspaces
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # ... other env vars
+
+volumes:
+  workspaces:
+```
+
+### Requirements
+
 1. Set all required environment variables
 2. Have a Supabase instance (cloud or self-hosted)
 3. Configure Git provider OAuth if using private repos
 
 ## Contributing
 
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Contributing
-
 Contributions are welcome!
-
-### How to Contribute
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
-
-### Development Setup
-
-```bash
-git clone https://github.com/lawzlo/xgenie-askcode.git
-cd xgenie-askcode
-npm install
-cp .env.example .env
-# Edit .env with your credentials
-npm run dev
-```
 
 ### Code Style
 
