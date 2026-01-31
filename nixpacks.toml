@@ -3,4 +3,4 @@
 nixPkgs = ["nodejs", "postgresql", "git"]
 
 [start]
-cmd = "sh -c 'node scripts/migrate.cjs && npm start'"
+cmd = "sh -c 'node scripts/migrate.cjs && node .next/standalone/server.js'"

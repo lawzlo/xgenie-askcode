@@ -5,8 +5,8 @@
   "description": "AI-powered codebase Q&A for non-developers",
   "scripts": {
     "dev": "node scripts/migrate.cjs && next dev -p 3010",
-    "build": "next build",
-    "start": "next start -p 3010",
+    "build": "next build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public 2>/dev/null || true",
+    "start": "node .next/standalone/server.js",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "migrate": "node scripts/migrate.cjs",
