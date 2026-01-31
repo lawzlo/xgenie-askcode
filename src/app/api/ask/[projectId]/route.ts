@@ -2,7 +2,7 @@ import * as fs from 'fs/promises'
 import type { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { getProject, syncProject } from '../../../../services/project'
-import { askQuestion } from '../../../../services/agent'
+import { askQuestionStream } from '../../../../services/agent'
 import { hasTeamAccess } from '../../../../services/team'
 import { jsonResponse, optionsResponse, parseJson, requireAuth } from '../../../../server/api'
 
@@ -62,17 +62,50 @@ export async function POST(request: NextRequest, { params }: Params) {
       `[Ask] User: ${auth.user!.email}, Project: ${project.name}, Question: ${parsed.data.question}`
     )
 
-    const response = await askQuestion(project, parsed.data.question, {
-      userId: auth.user!.id,
-      userEmail: auth.user!.email,
-      teamId
+    // Create SSE stream
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          const generator = askQuestionStream(project, parsed.data.question, {
+            userId: auth.user!.id,
+            userEmail: auth.user!.email,
+            teamId
+          })
+
+          for await (const event of generator) {
+            const data = JSON.stringify(event)
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`))
+
+            if (event.type === 'complete') {
+              console.log(
+                `[Ask] Files read: ${event.data.filesRead.join(', ')}, Conversation length: ${event.data.conversationLength}`
+              )
+            }
+          }
+
+          controller.close()
+        } catch (error) {
+          console.error('Stream error:', error)
+          const errorEvent = JSON.stringify({
+            type: 'error',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          })
+          controller.enqueue(encoder.encode(`data: ${errorEvent}\n\n`))
+          controller.close()
+        }
+      }
     })
 
-    console.log(
-      `[Ask] Files read: ${response.filesRead.join(', ')}, Conversation length: ${response.conversationLength}`
-    )
-
-    return jsonResponse(response)
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Team-Id'
+      }
+    })
   } catch (error) {
     console.error('Failed to process question:', error)
     return jsonResponse(
