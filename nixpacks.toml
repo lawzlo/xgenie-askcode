@@ -1,5 +1,4 @@
-# Nixpacks configuration
-# Cache bust: 2026-01-31-v2
+# Nixpacks configuration (for Nixpacks deployments)
 [phases.setup]
 nixPkgs = ["nodejs", "postgresql", "git"]
 
