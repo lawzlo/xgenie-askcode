@@ -31,6 +31,7 @@ export function useChat({
   const [selectedProjectName, setSelectedProjectName] = useState('')
   const [chatMessages, setChatMessages] = useState<Message[]>([])
   const [chatLoading, setChatLoading] = useState(false)
+  const [chatStatusText, setChatStatusText] = useState('')
   const [historyLoading, setHistoryLoading] = useState(false)
   const [questionInput, setQuestionInput] = useState('')
   const [questionSuggestions, setQuestionSuggestions] = useState<string[]>([])
@@ -184,35 +185,83 @@ export function useChat({
       }
     ])
     setChatLoading(true)
+    setChatStatusText('Thinking...')
 
     abortControllerRef.current = new AbortController()
 
     try {
-      const data = await apiRequest<{
-        id?: string
-        answer: string
-        filesRead: string[]
-        followUpSuggestions?: string[]
-      }>(`/api/ask/${activeProjectId}`, {
+      const headers = getAuthHeaders()
+      const response = await fetch(`/api/ask/${activeProjectId}`, {
         method: 'POST',
-        headers: getAuthHeaders(),
-        body: { question: trimmedQuestion },
-        signal: abortControllerRef.current.signal,
-        onUnauthorized: clearSession
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify({ question: trimmedQuestion }),
+        signal: abortControllerRef.current.signal
       })
-      if (selectedProjectIdRef.current !== activeProjectId) return
 
-      setChatMessages((prev) =>
-        prev.map((message, index) =>
-          index === pendingIndex
-            ? { ...message, id: data.id, answer: data.answer, filesRead: data.filesRead }
-            : message
-        )
-      )
+      if (response.status === 401) {
+        clearSession()
+        return
+      }
 
-      // Update suggestions with follow-up questions
-      if (data.followUpSuggestions && data.followUpSuggestions.length > 0) {
-        setQuestionSuggestions(data.followUpSuggestions)
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to get answer')
+      }
+
+      // Handle SSE stream
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6)
+            try {
+              const event = JSON.parse(jsonStr)
+
+              if (event.type === 'status') {
+                setChatStatusText(event.message)
+              } else if (event.type === 'complete') {
+                if (selectedProjectIdRef.current !== activeProjectId) return
+
+                setChatMessages((prev) =>
+                  prev.map((message, index) =>
+                    index === pendingIndex
+                      ? {
+                          ...message,
+                          id: event.data.id,
+                          answer: event.data.answer,
+                          filesRead: event.data.filesRead
+                        }
+                      : message
+                  )
+                )
+
+                // Update suggestions with follow-up questions
+                if (event.data.followUpSuggestions && event.data.followUpSuggestions.length > 0) {
+                  setQuestionSuggestions(event.data.followUpSuggestions)
+                }
+              } else if (event.type === 'error') {
+                throw new Error(event.message)
+              }
+            } catch (parseErr) {
+              console.error('Failed to parse SSE event:', parseErr)
+            }
+          }
+        }
       }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
@@ -229,6 +278,7 @@ export function useChat({
     } finally {
       abortControllerRef.current = null
       setChatLoading(false)
+      setChatStatusText('')
       questionInputRef.current?.focus()
     }
   }, [
@@ -278,6 +328,7 @@ export function useChat({
     selectedProjectName,
     chatMessages,
     chatLoading,
+    chatStatusText,
     historyLoading,
     questionInput,
     questionSuggestions,

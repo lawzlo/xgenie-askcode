@@ -110,6 +110,7 @@ export function useProjects({
     editSelectedRepos: editor.editSelectedRepos,
     chatMessages: chat.chatMessages,
     chatLoading: chat.chatLoading,
+    chatStatusText: chat.chatStatusText,
     historyLoading: chat.historyLoading,
     questionInput: chat.questionInput,
     questionSuggestions: chat.questionSuggestions,

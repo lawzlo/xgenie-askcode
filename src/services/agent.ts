@@ -17,6 +17,41 @@ export type AskQuestionContext = {
   teamId: string
 }
 
+// Status messages that don't expose internal details
+const TOOL_STATUS_MESSAGES: Record<string, string[]> = {
+  read_file: [
+    'Reading source code...',
+    'Examining code files...',
+    'Analyzing source files...'
+  ],
+  list_directory: [
+    'Exploring project structure...',
+    'Browsing directories...',
+    'Mapping folder layout...'
+  ],
+  search_files: [
+    'Searching for relevant files...',
+    'Looking for matching files...',
+    'Scanning project files...'
+  ],
+  grep: [
+    'Analyzing code patterns...',
+    'Searching code content...',
+    'Finding relevant code...'
+  ]
+}
+
+function getToolStatusMessage(toolName: string, callCount: number): string {
+  const messages = TOOL_STATUS_MESSAGES[toolName]
+  if (!messages) return 'Processing...'
+  // Rotate through messages based on call count
+  return messages[callCount % messages.length]
+}
+
+export type StreamEvent =
+  | { type: 'status'; message: string }
+  | { type: 'complete'; data: AskResponse }
+
 const client = new Anthropic()
 
 // Base prompt shared by all access levels
@@ -313,6 +348,154 @@ Return ONLY a JSON array of 3 strings. Example: ["How do users log in?", "What d
     console.error('Failed to generate follow-up suggestions:', err)
   }
   return []
+}
+
+export async function* askQuestionStream(
+  project: Project,
+  question: string,
+  context: AskQuestionContext
+): AsyncGenerator<StreamEvent> {
+  const { userId, userEmail, teamId } = context
+  const filesRead: string[] = []
+  const toolCallCounts: Record<string, number> = {}
+
+  // Get user's access level for this team
+  const accessLevel = await getUserAccessLevel(teamId, userId)
+  const systemPrompt = getSystemPrompt(accessLevel)
+
+  // Load conversation history from database
+  const history = await getConversationHistory(project.id, userId)
+
+  // Build messages array from conversation history
+  const apiMessages: Anthropic.MessageParam[] = []
+
+  // Add conversation history
+  for (const msg of history) {
+    apiMessages.push({ role: 'user', content: msg.question })
+    apiMessages.push({ role: 'assistant', content: msg.answer })
+  }
+
+  // Add current question
+  const currentQuestion = history.length === 0
+    ? `Project: ${project.name}\n\nQuestion: ${question}`
+    : question
+
+  apiMessages.push({ role: 'user', content: currentQuestion })
+
+  yield { type: 'status', message: 'Thinking...' }
+
+  let response = await client.messages.create({
+    model: 'claude-opus-4-5-20251101',
+    max_tokens: 4096,
+    system: systemPrompt,
+    tools: toolDefinitions,
+    messages: apiMessages
+  })
+
+  // Agentic loop - keep processing until we get a final answer
+  while (response.stop_reason === 'tool_use') {
+    const assistantMessage: Anthropic.MessageParam = {
+      role: 'assistant',
+      content: response.content
+    }
+    apiMessages.push(assistantMessage)
+
+    const toolResults: Anthropic.ToolResultBlockParam[] = []
+
+    for (const block of response.content) {
+      if (block.type === 'tool_use') {
+        // Track call count for this tool type
+        toolCallCounts[block.name] = (toolCallCounts[block.name] || 0) + 1
+
+        // Emit status update (friendly message, no details)
+        yield {
+          type: 'status',
+          message: getToolStatusMessage(block.name, toolCallCounts[block.name] - 1)
+        }
+
+        const result = await executeTool(
+          project.workspacePath,
+          block.name,
+          block.input as Record<string, string>,
+          filesRead
+        )
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: result
+        })
+      }
+    }
+
+    apiMessages.push({
+      role: 'user',
+      content: toolResults
+    })
+
+    yield { type: 'status', message: 'Thinking...' }
+
+    response = await client.messages.create({
+      model: 'claude-opus-4-5-20251101',
+      max_tokens: 4096,
+      system: systemPrompt,
+      tools: toolDefinitions,
+      messages: apiMessages
+    })
+  }
+
+  // Extract final text response
+  const textBlocks = response.content.filter(
+    (block): block is Anthropic.TextBlock => block.type === 'text'
+  )
+  const answer = textBlocks.map(b => b.text).join('\n')
+
+  // Save to database
+  const uniqueFilesRead = [...new Set(filesRead)]
+  const { data: insertedConversation, error } = await supabase
+    .from('conversations')
+    .insert({
+      project_id: project.id,
+      user_id: userId,
+      question,
+      answer,
+      files_read: uniqueFilesRead
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    console.error('Failed to save conversation:', error)
+  }
+
+  // Log audit entry
+  await logAudit({
+    teamId,
+    userId,
+    userEmail,
+    action: 'ask_question',
+    resourceType: 'conversation',
+    resourceId: insertedConversation?.id,
+    metadata: {
+      project_name: project.name,
+      question,
+      files_read_count: uniqueFilesRead.length
+    }
+  })
+
+  // Generate follow-up suggestions
+  const followUpSuggestions = await generateFollowUpSuggestions(project.name, question, answer)
+
+  yield {
+    type: 'complete',
+    data: {
+      id: insertedConversation?.id,
+      answer,
+      filesRead: uniqueFilesRead,
+      conversationLength: history.length + 1,
+      followUpSuggestions
+    }
+  }
 }
 
 async function executeTool(
