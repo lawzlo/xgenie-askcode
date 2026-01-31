@@ -24,7 +24,11 @@ async function claimJob(): Promise<ProjectJob | null> {
     console.error('[worker] Failed to claim job:', error)
     return null
   }
-  return data || null
+  // Validate that we got a real job with required fields
+  if (!data || !data.id || !data.project_id) {
+    return null
+  }
+  return data as ProjectJob
 }
 
 async function updateJob(jobId: string, updates: Record<string, unknown>) {
