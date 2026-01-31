@@ -290,20 +290,8 @@ export async function listProjects(teamId: string): Promise<Project[]> {
     syncStatus: (row.sync_status as SyncStatus) || 'ready'
   }))
 
-  // Check which projects need sync (workspace doesn't exist)
-  // and trigger background sync for them
-  for (const project of projects) {
-    if (project.syncStatus === 'ready') {
-      try {
-        await fs.access(project.workspacePath)
-      } catch {
-        // Workspace missing, mark as pending and trigger sync
-        project.syncStatus = 'pending'
-        await updateSyncStatus(project.id, 'pending')
-        await enqueueProjectJob(project.id, project.teamId, 'sync')
-      }
-    }
-  }
+  // Note: Don't check filesystem here - app and worker may be in different containers
+  // Trust the database sync_status instead
 
   return projects
 }
