@@ -13,6 +13,7 @@ type ConversationSectionProps = {
   historyLoading: boolean
   chatMessages: Message[]
   chatLoading: boolean
+  chatStatusText: string
   questionInput: string
   onQuestionInputChange: (value: string) => void
   questionInputRef: RefObject<HTMLTextAreaElement | null>
@@ -32,6 +33,7 @@ export function ConversationSection({
   historyLoading,
   chatMessages,
   chatLoading,
+  chatStatusText,
   questionInput,
   onQuestionInputChange,
   questionInputRef,
@@ -134,7 +136,7 @@ export function ConversationSection({
 
       {chatLoading ? (
         <div className="loading">
-          <span className="loading-spinner">?</span> AI is exploring the codebase...
+          <span className="loading-spinner">?</span> {chatStatusText || 'AI is exploring the codebase...'}
           <button
             type="button"
             className="link-button"
