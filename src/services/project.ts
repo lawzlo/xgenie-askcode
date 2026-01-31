@@ -140,7 +140,13 @@ async function syncProjectWorkspace(
         await git.pull()
         console.log(`Pulled ${repo.name} successfully`)
       } catch {
-        console.log(`Repo ${repo.name} missing, cloning...`)
+        // Remove existing directory if it exists (may be corrupted/partial clone)
+        try {
+          await fs.rm(repoPath, { recursive: true, force: true })
+        } catch {
+          // Ignore if directory doesn't exist
+        }
+        console.log(`Repo ${repo.name} missing or corrupted, cloning...`)
         await cloneRepositoryToPath(
           repo.url,
           repo.branch,
@@ -159,6 +165,12 @@ async function syncProjectWorkspace(
     const git = createGitClient(project)
     await git.pull()
   } catch {
+    // Remove existing directory if it exists (may be corrupted/partial clone)
+    try {
+      await fs.rm(project.workspacePath, { recursive: true, force: true })
+    } catch {
+      // Ignore if directory doesn't exist
+    }
     await cloneProjectWorkspace(project)
   }
 }
