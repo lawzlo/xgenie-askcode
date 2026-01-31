@@ -6,8 +6,11 @@ const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID()}`
 const POLL_INTERVAL_MS = Number(process.env.JOB_POLL_INTERVAL_MS || 2000)
 const IDLE_DELAY_MS = Number(process.env.JOB_IDLE_DELAY_MS || 4000)
 const MAX_BACKOFF_MS = Number(process.env.JOB_MAX_BACKOFF_MS || 30000)
+const STALE_JOB_TIMEOUT_MS = Number(process.env.JOB_STALE_TIMEOUT_MS || 10 * 60 * 1000) // 10 minutes
+const STALE_CHECK_INTERVAL_MS = 60 * 1000 // Check every minute
 
 let shouldStop = false
+let lastStaleCheck = 0
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -16,6 +19,30 @@ function sleep(ms: number) {
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message
   return 'Unknown error'
+}
+
+async function resetStaleJobs() {
+  const staleThreshold = new Date(Date.now() - STALE_JOB_TIMEOUT_MS).toISOString()
+  const { data, error } = await supabase
+    .from('project_jobs')
+    .update({
+      status: 'queued',
+      locked_by: null,
+      started_at: null,
+      updated_at: new Date().toISOString()
+    })
+    .eq('status', 'running')
+    .lt('started_at', staleThreshold)
+    .select('id')
+
+  if (error) {
+    console.error('[worker] Failed to reset stale jobs:', error)
+    return
+  }
+
+  if (data && data.length > 0) {
+    console.log(`[worker] Reset ${data.length} stale job(s): ${data.map(j => j.id).join(', ')}`)
+  }
 }
 
 async function claimJob(): Promise<ProjectJob | null> {
@@ -81,7 +108,18 @@ async function handleJob(job: ProjectJob) {
 
 async function loop() {
   console.log(`[worker] Starting with id ${WORKER_ID}`)
+
+  // Reset stale jobs on startup
+  await resetStaleJobs()
+  lastStaleCheck = Date.now()
+
   while (!shouldStop) {
+    // Periodically check for stale jobs
+    if (Date.now() - lastStaleCheck > STALE_CHECK_INTERVAL_MS) {
+      await resetStaleJobs()
+      lastStaleCheck = Date.now()
+    }
+
     const job = await claimJob()
     if (!job) {
       await sleep(IDLE_DELAY_MS)
