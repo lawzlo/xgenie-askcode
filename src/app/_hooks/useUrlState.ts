@@ -21,17 +21,19 @@ export function useUrlState() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
+  // Use window.location.search inside callback to avoid infinite loop
+  // (searchParams changes reference on every navigation)
   const updateParam = useCallback(
     (key: string, value: string | null, mode: UpdateMode = 'replace') => {
-      const current = searchParams.toString()
-      const nextParams = new URLSearchParams(current)
+      const current = new URLSearchParams(window.location.search)
+      const currentStr = current.toString()
       if (!value) {
-        nextParams.delete(key)
+        current.delete(key)
       } else {
-        nextParams.set(key, value)
+        current.set(key, value)
       }
-      const next = nextParams.toString()
-      if (next === current) return
+      const next = current.toString()
+      if (next === currentStr) return
       const nextUrl = `${pathname}${next ? `?${next}` : ''}`
       if (mode === 'push') {
         router.push(nextUrl)
@@ -39,7 +41,7 @@ export function useUrlState() {
         router.replace(nextUrl)
       }
     },
-    [pathname, router, searchParams]
+    [pathname, router]
   )
 
   return {
