@@ -1,6 +1,7 @@
+import * as fs from 'fs/promises'
 import type { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { getProject } from '../../../../services/project'
+import { getProject, syncProject } from '../../../../services/project'
 import { askQuestion } from '../../../../services/agent'
 import { hasTeamAccess } from '../../../../services/team'
 import { jsonResponse, optionsResponse, parseJson, requireAuth } from '../../../../server/api'
@@ -46,6 +47,15 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     if (project.syncStatus !== 'ready') {
       return jsonResponse({ error: 'Project is still syncing. Please try again shortly.' }, 409)
+    }
+
+    // Check if workspace actually exists (may be missing after volume reset/new deployment)
+    try {
+      await fs.access(project.workspacePath)
+    } catch {
+      // Workspace missing, trigger sync and return error
+      await syncProject(project.id, teamId)
+      return jsonResponse({ error: 'Project files not found. Syncing now, please try again shortly.' }, 409)
     }
 
     console.log(
