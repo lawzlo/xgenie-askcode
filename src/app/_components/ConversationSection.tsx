@@ -139,13 +139,13 @@ export function ConversationSection({
       {chatLoading ? (
         <div className="loading">
           <div className="loading-steps">
-            {completedSteps.map((step, index) => (
+            {completedSteps.slice(-3).map((step, index) => (
               <div key={index} className="loading-step completed">
                 <span className="step-icon">✓</span> {step}
               </div>
             ))}
             <div className="loading-step current">
-              <span className="loading-spinner">◐</span> {chatStatusText || 'Thinking...'}
+              <span className="loading-spinner">?</span> {chatStatusText || 'Thinking...'}
             </div>
           </div>
           <button
