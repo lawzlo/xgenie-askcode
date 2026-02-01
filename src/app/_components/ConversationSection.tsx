@@ -14,6 +14,7 @@ type ConversationSectionProps = {
   chatMessages: Message[]
   chatLoading: boolean
   chatStatusText: string
+  completedSteps: string[]
   questionInput: string
   onQuestionInputChange: (value: string) => void
   questionInputRef: RefObject<HTMLTextAreaElement | null>
@@ -34,6 +35,7 @@ export function ConversationSection({
   chatMessages,
   chatLoading,
   chatStatusText,
+  completedSteps,
   questionInput,
   onQuestionInputChange,
   questionInputRef,
@@ -136,11 +138,20 @@ export function ConversationSection({
 
       {chatLoading ? (
         <div className="loading">
-          <span className="loading-spinner">?</span> {chatStatusText || 'AI is exploring the codebase...'}
+          <div className="loading-steps">
+            {completedSteps.map((step, index) => (
+              <div key={index} className="loading-step completed">
+                <span className="step-icon">✓</span> {step}
+              </div>
+            ))}
+            <div className="loading-step current">
+              <span className="loading-spinner">◐</span> {chatStatusText || 'Thinking...'}
+            </div>
+          </div>
           <button
             type="button"
             className="link-button"
-            style={{ marginLeft: 10 }}
+            style={{ marginTop: 8 }}
             onClick={onCancelAsk}
           >
             cancel

@@ -32,6 +32,7 @@ export function useChat({
   const [chatMessages, setChatMessages] = useState<Message[]>([])
   const [chatLoading, setChatLoading] = useState(false)
   const [chatStatusText, setChatStatusText] = useState('')
+  const [completedSteps, setCompletedSteps] = useState<string[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [questionInput, setQuestionInput] = useState('')
   const [questionSuggestions, setQuestionSuggestions] = useState<string[]>([])
@@ -186,6 +187,7 @@ export function useChat({
     ])
     setChatLoading(true)
     setChatStatusText('Thinking...')
+    setCompletedSteps([])
 
     abortControllerRef.current = new AbortController()
 
@@ -234,6 +236,8 @@ export function useChat({
 
               if (event.type === 'status') {
                 setChatStatusText(event.message)
+              } else if (event.type === 'step_complete') {
+                setCompletedSteps((prev) => [...prev, event.message])
               } else if (event.type === 'complete') {
                 if (selectedProjectIdRef.current !== activeProjectId) return
 
@@ -279,6 +283,7 @@ export function useChat({
       abortControllerRef.current = null
       setChatLoading(false)
       setChatStatusText('')
+      setCompletedSteps([])
       questionInputRef.current?.focus()
     }
   }, [
@@ -329,6 +334,7 @@ export function useChat({
     chatMessages,
     chatLoading,
     chatStatusText,
+    completedSteps,
     historyLoading,
     questionInput,
     questionSuggestions,

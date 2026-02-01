@@ -1,0 +1,20 @@
+{
+  "name": "askcode-promo-video",
+  "version": "1.0.0",
+  "description": "AskCode promotional video built with Remotion",
+  "scripts": {
+    "dev": "remotion studio",
+    "build": "remotion render AskCodePromo out/promo.mp4",
+    "build:gif": "remotion render AskCodePromo out/promo.gif --image-format=png --every-nth-frame=2"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "typescript": "^5.0.0"
+  }
+}

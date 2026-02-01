@@ -53,6 +53,16 @@
       font-size: 10pt;
     }
     .header-right a { color: #000; }
+    .github-link {
+      display: inline-flex;
+      align-items: center;
+      color: #000;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+    .github-link:hover {
+      opacity: 1;
+    }
     .user-email { color: #000; }
 
     /* Main Content */
@@ -272,6 +282,25 @@
     @keyframes spin {
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
+    }
+    .loading-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .loading-step {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .loading-step.completed {
+      color: #828282;
+    }
+    .loading-step.completed .step-icon {
+      color: #5a9a5a;
+    }
+    .loading-step.current {
+      color: #000;
     }
 
     /* Modal */
