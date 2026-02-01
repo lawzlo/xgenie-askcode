@@ -471,6 +471,7 @@ export default function HomePageClient() {
               chatMessages={projects.chatMessages}
               chatLoading={projects.chatLoading}
               chatStatusText={projects.chatStatusText}
+              completedSteps={projects.completedSteps}
               questionInput={projects.questionInput}
               onQuestionInputChange={projects.setQuestionInput}
               questionInputRef={projects.questionInputRef}

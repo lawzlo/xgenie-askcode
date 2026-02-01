@@ -50,6 +50,7 @@ function getToolStatusMessage(toolName: string, callCount: number): string {
 
 export type StreamEvent =
   | { type: 'status'; message: string }
+  | { type: 'step_complete'; message: string }
   | { type: 'complete'; data: AskResponse }
 
 const client = new Anthropic()
@@ -407,10 +408,13 @@ export async function* askQuestionStream(
         // Track call count for this tool type
         toolCallCounts[block.name] = (toolCallCounts[block.name] || 0) + 1
 
+        // Get the status message for this tool
+        const statusMessage = getToolStatusMessage(block.name, toolCallCounts[block.name] - 1)
+
         // Emit status update (friendly message, no details)
         yield {
           type: 'status',
-          message: getToolStatusMessage(block.name, toolCallCounts[block.name] - 1)
+          message: statusMessage
         }
 
         const result = await executeTool(
@@ -419,6 +423,12 @@ export async function* askQuestionStream(
           block.input as Record<string, string>,
           filesRead
         )
+
+        // Emit step complete event
+        yield {
+          type: 'step_complete',
+          message: statusMessage
+        }
 
         toolResults.push({
           type: 'tool_result',

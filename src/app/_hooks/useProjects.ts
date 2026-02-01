@@ -111,6 +111,7 @@ export function useProjects({
     chatMessages: chat.chatMessages,
     chatLoading: chat.chatLoading,
     chatStatusText: chat.chatStatusText,
+    completedSteps: chat.completedSteps,
     historyLoading: chat.historyLoading,
     questionInput: chat.questionInput,
     questionSuggestions: chat.questionSuggestions,
