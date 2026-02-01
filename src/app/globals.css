@@ -51,6 +51,9 @@
     .header-right {
       margin-left: auto;
       font-size: 10pt;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
     .header-right a { color: #000; }
     .github-link {
@@ -62,6 +65,9 @@
     }
     .github-link:hover {
       opacity: 1;
+    }
+    .github-link svg {
+      vertical-align: middle;
     }
     .user-email { color: #000; }
 
