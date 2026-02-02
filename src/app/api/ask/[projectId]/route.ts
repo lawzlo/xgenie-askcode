@@ -14,7 +14,7 @@ type Params = {
 }
 
 const AskSchema = z.object({
-  question: z.string().min(1).max(2000)
+  question: z.string().min(1).max(10000)
 })
 
 export async function POST(request: NextRequest, { params }: Params) {
