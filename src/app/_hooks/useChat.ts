@@ -43,12 +43,14 @@ export function useChat({
   const selectedProjectIdRef = useRef<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
+  // Only reset when user or team actually changes, not on token refresh
+  const userId = session?.user?.id
   useEffect(() => {
     setSelectedProjectId(null)
     setSelectedProjectName('')
     setChatMessages([])
     if (onSelectedProjectChange) onSelectedProjectChange(null)
-  }, [session, currentTeamId, onSelectedProjectChange])
+  }, [userId, currentTeamId, onSelectedProjectChange])
 
   useEffect(() => {
     if (!selectedProjectId) {
