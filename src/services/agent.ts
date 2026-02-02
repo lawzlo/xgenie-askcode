@@ -220,7 +220,7 @@ export async function askQuestion(
 
   let response = await client.messages.create({
     model: 'claude-opus-4-5-20251101',
-    max_tokens: 16384,
+    max_tokens: 8192,
     system: systemPrompt,
     tools: toolDefinitions,
     messages: apiMessages
@@ -260,7 +260,7 @@ export async function askQuestion(
 
     response = await client.messages.create({
       model: 'claude-opus-4-5-20251101',
-      max_tokens: 16384,
+      max_tokens: 8192,
       system: systemPrompt,
       tools: toolDefinitions,
       messages: apiMessages
@@ -387,7 +387,7 @@ export async function* askQuestionStream(
 
   let response = await client.messages.create({
     model: 'claude-opus-4-5-20251101',
-    max_tokens: 16384,
+    max_tokens: 8192,
     system: systemPrompt,
     tools: toolDefinitions,
     messages: apiMessages
@@ -447,7 +447,7 @@ export async function* askQuestionStream(
 
     response = await client.messages.create({
       model: 'claude-opus-4-5-20251101',
-      max_tokens: 16384,
+      max_tokens: 8192,
       system: systemPrompt,
       tools: toolDefinitions,
       messages: apiMessages
