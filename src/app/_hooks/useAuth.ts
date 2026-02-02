@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AuthMode, Session, Team, ToastType } from '../_types'
+import type { AuthMode, Team, ToastType } from '../_types'
 import { supabase } from '../_lib/supabase'
 import { apiRequest } from '../_lib/api'
+import { useSupabaseContext } from '../_contexts/SupabaseContext'
 
 const STORAGE_KEYS = {
   teams: 'askcode_teams',
@@ -15,7 +16,7 @@ type UseAuthParams = {
 }
 
 export function useAuth({ showToast }: UseAuthParams) {
-  const [session, setSession] = useState<Session | null>(null)
+  const { session, setSession, initialized: supabaseInitialized } = useSupabaseContext()
   const [teams, setTeams] = useState<Team[]>([])
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
@@ -118,7 +119,7 @@ export function useAuth({ showToast }: UseAuthParams) {
     if (reason === 'expired') {
       showToastRef.current('Session expired. Please log in again.', 'error')
     }
-  }, [])
+  }, [setSession])
 
   const getAuthHeaders = useCallback((): Record<string, string> => {
     if (!session) return {}
@@ -160,26 +161,24 @@ export function useAuth({ showToast }: UseAuthParams) {
     }
   }, [])
 
-  // Initialize Supabase auth listener
+  // Track previous session to detect changes
+  const prevSessionRef = useRef<string | null>(null)
+  const hasInitializedTeams = useRef(false)
+
+  // Handle auth state changes for teams and modals
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, supaSession) => {
       if (event === 'SIGNED_OUT' || !supaSession) {
         clearSession()
+        hasInitializedTeams.current = false
         setInitializing(false)
         return
       }
 
-      // Update session for all authenticated events
-      setSession({
-        access_token: supaSession.access_token,
-        refresh_token: supaSession.refresh_token,
-        user: { id: supaSession.user.id, email: supaSession.user.email || '' }
-      })
-
       if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
         void fetchTeams(supaSession.access_token).finally(() => setInitializing(false))
+        hasInitializedTeams.current = true
       } else if (event === 'PASSWORD_RECOVERY') {
-        // User clicked password reset link in email
         setInitializing(false)
         openResetModal('Reset password')
       } else {
@@ -189,6 +188,13 @@ export function useAuth({ showToast }: UseAuthParams) {
 
     return () => subscription.unsubscribe()
   }, [clearSession, fetchTeams, openResetModal])
+
+  // Sync initializing state with supabase context
+  useEffect(() => {
+    if (supabaseInitialized && !session && !hasInitializedTeams.current) {
+      setInitializing(false)
+    }
+  }, [supabaseInitialized, session])
 
   useEffect(() => {
     return () => {
