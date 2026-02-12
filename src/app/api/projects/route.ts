@@ -11,7 +11,6 @@ const CreateProjectSchema = z.object({
   branch: z.string().optional(),
   credentials: z
     .object({
-      username: z.string(),
       token: z.string()
     })
     .optional(),
