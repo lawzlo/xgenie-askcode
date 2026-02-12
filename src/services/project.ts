@@ -671,6 +671,13 @@ export async function processProjectJob(job: ProjectJob): Promise<void> {
         await fs.mkdir(project.workspacePath, { recursive: true })
         for (const repo of repos) {
           const repoPath = path.join(project.workspacePath, repo.name)
+          try {
+            await fs.access(repoPath)
+            console.log(`Repo ${repo.name} already exists, skipping clone`)
+            continue
+          } catch {
+            // Directory doesn't exist, proceed with clone
+          }
           await cloneRepositoryToPath(
             repo.gitUrl,
             repo.branch || 'main',
