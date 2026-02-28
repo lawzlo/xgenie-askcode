@@ -219,7 +219,7 @@ export async function askQuestion(
   apiMessages.push({ role: 'user', content: currentQuestion })
 
   let response = await client.messages.create({
-    model: 'claude-opus-4-5-20251101',
+    model: 'claude-sonnet-4-6',
     max_tokens: 16384,
     system: systemPrompt,
     tools: toolDefinitions,
@@ -259,7 +259,7 @@ export async function askQuestion(
     })
 
     response = await client.messages.create({
-      model: 'claude-opus-4-5-20251101',
+      model: 'claude-sonnet-4-6',
       max_tokens: 16384,
       system: systemPrompt,
       tools: toolDefinitions,
@@ -325,7 +325,7 @@ async function generateFollowUpSuggestions(
 ): Promise<string[]> {
   try {
     const response = await client.messages.create({
-      model: 'claude-opus-4-5-20251101',
+      model: 'claude-sonnet-4-6',
       max_tokens: 300,
       messages: [
         {
@@ -386,7 +386,7 @@ export async function* askQuestionStream(
   yield { type: 'status', message: 'Thinking...' }
 
   let response = await client.messages.create({
-    model: 'claude-opus-4-5-20251101',
+    model: 'claude-sonnet-4-6',
     max_tokens: 16384,
     system: systemPrompt,
     tools: toolDefinitions,
@@ -446,7 +446,7 @@ export async function* askQuestionStream(
     yield { type: 'status', message: 'Thinking...' }
 
     response = await client.messages.create({
-      model: 'claude-opus-4-5-20251101',
+      model: 'claude-sonnet-4-6',
       max_tokens: 16384,
       system: systemPrompt,
       tools: toolDefinitions,
