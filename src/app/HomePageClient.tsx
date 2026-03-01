@@ -20,6 +20,7 @@ import { useConfirm } from './_hooks/useConfirm'
 import { useProjects } from './_hooks/useProjects'
 import { useProviders } from './_hooks/useProviders'
 import { useSaved } from './_hooks/useSaved'
+import { useSavedCredentials } from './_hooks/useSavedCredentials'
 import { useTeams } from './_hooks/useTeams'
 import { useToast } from './_hooks/useToast'
 import { useUrlState, type ModalState } from './_hooks/useUrlState'
@@ -64,6 +65,13 @@ export default function HomePageClient() {
     showToast,
     showConfirm
   })
+  const savedCreds = useSavedCredentials({
+    session: auth.session,
+    currentTeamId: auth.currentTeamId,
+    getAuthHeaders: auth.getAuthHeaders,
+    clearSession: auth.clearSession,
+    showToast
+  })
   const projects = useProjects({
     session: auth.session,
     currentTeamId: auth.currentTeamId,
@@ -72,6 +80,9 @@ export default function HomePageClient() {
     showToast,
     showConfirm,
     loadProviders: providers.loadProviders,
+    savedCredentials: savedCreds.savedCredentials,
+    loadSavedCredentials: savedCreds.loadSavedCredentials,
+    createSavedCredential: savedCreds.createSavedCredential,
     initialProjectId: urlProjectId,
     onSelectedProjectChange: handleSelectedProjectChange
   })
@@ -323,6 +334,16 @@ export default function HomePageClient() {
           onPrivateRepoChange={projects.setIsPrivateRepo}
           gitToken={projects.gitToken}
           onGitTokenChange={projects.setGitToken}
+          credentialMode={projects.credentialMode}
+          onCredentialModeChange={projects.setCredentialMode}
+          selectedCredentialId={projects.selectedCredentialId}
+          onSelectedCredentialChange={projects.setSelectedCredentialId}
+          saveNewCredential={projects.saveNewCredential}
+          onSaveNewCredentialChange={projects.setSaveNewCredential}
+          newCredentialName={projects.newCredentialName}
+          onNewCredentialNameChange={projects.setNewCredentialName}
+          savedCredentials={savedCreds.savedCredentials}
+          onDeleteSavedCredential={savedCreds.deleteSavedCredential}
           addProjectLoading={projects.addProjectLoading}
           onSubmitAddProject={projects.handleAddProject}
           connectedProviders={providers.connectedProviders}

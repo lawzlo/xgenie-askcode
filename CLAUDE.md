@@ -4,84 +4,80 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AskCode is an AI-powered codebase Q&A API for non-developers. It clones git repositories, then uses Claude with an agentic loop to answer questions about the codebase in plain language.
+AskCode is an AI-powered codebase Q&A API for non-developers. It clones git repositories, then uses Claude with an agentic loop to answer questions about the codebase in plain language. Built with Next.js 16 (standalone output) + Supabase + Anthropic SDK.
 
 ## Commands
 
 ```bash
 npm run dev      # Run migrations + start dev server (port 3010)
 npm run worker   # Run background job worker (clone/sync repos) - required for project creation
-npm run build    # Build Next.js app
-npm start        # Run Next.js production server
-npm run lint     # ESLint (Next.js config)
-npm run typecheck # TypeScript type check
-npm run migrate  # Run database migrations manually
+npm run build    # Build Next.js standalone app (copies static + public into .next/standalone/)
+npm start        # Run production server (node .next/standalone/server.js)
+npm run lint     # ESLint
+npm run typecheck # TypeScript type check (tsc --noEmit)
+npm run migrate  # Run database migrations manually (requires psql + DATABASE_URL)
 ```
 
 For local development, run both `npm run dev` and `npm run worker` in separate terminals.
 
 ## Architecture
 
-```
-src/
-├── app/
-│   ├── _components/      # React client components (Header, ProjectList, AuthModal, etc.)
-│   ├── _lib/             # Client-side utilities (fetch helpers, Supabase client)
-│   ├── health/route.ts   # GET /health
-│   └── api/              # Next.js Route Handlers (API)
-│       ├── ask/           # /api/ask/* - Q&A with SSE streaming
-│       ├── auth/          # /api/auth/*
-│       ├── projects/      # /api/projects/*
-│       ├── teams/         # /api/teams/*
-│       └── git-providers/ # /api/git-providers/*
-├── server/
-│   ├── api.ts            # Request/auth helpers + CORS responses
-│   └── worker.ts         # Background job processor (clone/sync)
-├── types.ts              # TypeScript interfaces
-├── services/
-│   ├── agent.ts          # Claude agentic loop orchestration
-│   ├── project.ts        # Git clone/sync + workspace management
-│   ├── team.ts           # Team membership logic
-│   ├── git-provider.ts   # Git platform authentication (GitHub, Gitea, etc.)
-│   └── audit.ts          # Audit logging for team activity
-├── tools/index.ts        # Claude tools: read_file, list_directory, search_files, grep
-└── lib/supabase.ts       # Supabase client initialization
-```
+**Two-Service Architecture**: The Next.js app server handles HTTP requests + SSE streaming, while a separate worker process (`tsx src/server/worker.ts`) handles git clone/sync jobs. Both must access the same `workspaces/` directory.
 
-**Two-Service Architecture**: The app server handles HTTP requests, while a separate worker process handles git clone/sync jobs. Both must access the same `workspaces/` directory.
+### Key directories
+
+- `src/app/api/` — Next.js Route Handlers (all use `runtime = 'nodejs'` + `dynamic = 'force-dynamic'`)
+- `src/server/api.ts` — Auth helpers (`requireAuth`, `requireTeamId`), CORS, JSON response utilities
+- `src/server/worker.ts` — Job queue poll loop with stale job recovery and exponential backoff
+- `src/services/agent.ts` — Claude agentic loop (both sync `askQuestion` and streaming `askQuestionStream`)
+- `src/services/project.ts` — Git clone/sync, workspace management, job enqueuing
+- `src/services/team.ts` — Team membership + access level logic
+- `src/services/git-provider.ts` — Git platform OAuth (GitHub App, Gitea, GitLab, Bitbucket)
+- `src/tools/index.ts` — Sandboxed tools Claude uses: `read_file`, `list_directory`, `search_files`, `grep`
+- `src/lib/supabase.ts` — Two Supabase clients: `supabase` (service role, bypasses RLS) and `supabaseAnon` (for auth)
+- `scripts/migrate.cjs` — Runs SQL migrations via `psql`. Requires `DATABASE_URL` env var; gracefully skips if psql or DATABASE_URL absent.
+- `supabase/migrations/` — Sequential SQL migrations (001-021), idempotent, run on dev startup
+
+### Path alias
+
+`@/*` maps to `./src/*` (configured in tsconfig.json).
 
 ## Key Patterns
 
-**Agentic Loop**: The AI agent in `services/agent.ts` runs Claude (claude-opus-4-5-20251101) in a loop until `stop_reason !== 'tool_use'`. Claude can call tools (read_file, grep, etc.) to explore the codebase before answering.
+**Agentic Loop**: `services/agent.ts` runs Claude (`claude-sonnet-4-6`) in a loop until `stop_reason !== 'tool_use'`. Claude calls sandboxed tools to explore the cloned workspace before answering. Both a non-streaming (`askQuestion`) and SSE streaming (`askQuestionStream`) variant exist.
 
 **Access Levels**: Team members have tiered access controlling what information Claude reveals:
 - `100` (Full/Developer): Technical details, code structure, API endpoints
 - `60` (Internal/Product): Business logic, data flows, no third-party names
 - `30` (External/Support): User-facing features only, no internal details
 
-Owners always have level 100. Access level is checked in `getUserAccessLevel()` and determines which system prompt Claude uses.
+Owners always have level 100. Access level is checked in `getUserAccessLevel()` and selects one of three system prompts.
 
-**Team-Based Access**: All resources (projects, git providers) belong to teams. Protected routes require:
-- `Authorization: Bearer <token>` header (JWT from Supabase)
-- `X-Team-Id: <uuid>` header to specify which team context
+**Protected Route Pattern**: All API routes follow the same auth flow:
+1. `requireAuth(request)` — validates `Authorization: Bearer <token>` via Supabase
+2. `requireTeamId(request, userId)` — validates `X-Team-Id` header and checks team membership
+3. Zod schema validation on request body
+4. Returns via `jsonResponse()` (adds CORS headers)
 
-**RLS Enforcement**: PostgreSQL Row-Level Security policies ensure users only access teams they own or are members of. The service role client bypasses RLS for backend operations.
+**Path Security**: Tools in `tools/index.ts` validate all paths with `securePath()` — resolves paths and rejects anything outside the workspace root.
 
-**Path Security**: Tools in `tools/index.ts` validate paths with `securePath()` to prevent directory traversal outside the workspace.
+**Job Queue**: Git operations (clone/sync/add_repos) are enqueued in `project_jobs` table. The worker polls via `claim_project_job` RPC, with stale job detection (10min timeout) and retry with exponential backoff.
 
-**Multi-Repo Projects**: A single project can contain multiple git repositories cloned to subdirectories under `workspaces/<teamId>_<timestamp>/`.
+**SSE Streaming**: Q&A uses Server-Sent Events via `askQuestionStream()` async generator. Events: `status` (progress message), `step_complete` (tool finished), `complete` (final answer with follow-up suggestions).
 
-**Streaming Responses**: Q&A uses Server-Sent Events (SSE) via `askQuestionStream()` generator. Events include `status` (progress), `step_complete` (tool finished), and `complete` (final response).
+**Multi-Repo Projects**: A single project can contain multiple git repositories. The `git_urls` JSON column stores `{ url, branch, name }[]`. Each repo is cloned to a subdirectory under `workspaces/<teamId>_<timestamp>/`.
 
-**Job Queue**: Git operations (clone/sync) are queued in `project_jobs` table and processed by the worker. Jobs have retry logic with exponential backoff.
+**Follow-up Suggestions**: After answering, a separate Claude call generates 3 follow-up question suggestions. The `/api/projects/[id]/suggestions` endpoint also generates initial questions based on file structure.
 
 ## Database
 
-Uses Supabase (PostgreSQL). Migrations in `supabase/migrations/` run automatically on dev startup.
+Uses Supabase (PostgreSQL). Migrations in `supabase/migrations/` run automatically on `npm run dev` via `scripts/migrate.cjs` (needs `psql` in PATH).
 
-Key tables: `projects`, `conversations`, `teams`, `team_members`, `team_invites`, `git_providers`, `audit_logs`, `shared_conversations`, `project_jobs`
+Key tables: `projects`, `conversations`, `teams`, `team_members`, `team_invites`, `git_providers`, `audit_logs`, `shared_conversations`, `saved_conversations`, `project_jobs`
+
+RLS is enabled on team-related tables. The service role client in `src/lib/supabase.ts` bypasses RLS for backend operations.
 
 ## Environment Variables
 
 Required: `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-Optional: `PORT` (default 3010), `WORKSPACE_ROOT`, `DATABASE_URL`
+Optional: `PORT` (default 3010), `WORKSPACE_ROOT` (default `./workspaces`), `DATABASE_URL` (for auto-migrations)

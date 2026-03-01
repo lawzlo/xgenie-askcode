@@ -6,11 +6,38 @@ import type {
   Project,
   ProviderRepo,
   ProviderSelection,
+  SavedCredential,
   Session,
   ToastType
 } from '../_types'
 import { extractRepoName } from '../_lib/utils'
 import { apiRequest } from '../_lib/api'
+
+function inferPlatform(gitUrl: string): string {
+  try {
+    const url = new URL(gitUrl)
+    const host = url.hostname.toLowerCase()
+    if (host.includes('github')) return 'github'
+    if (host.includes('gitlab')) return 'gitlab'
+    if (host.includes('bitbucket')) return 'bitbucket'
+    if (host.includes('gitea')) return 'gitea'
+    return 'other'
+  } catch {
+    return 'other'
+  }
+}
+
+export function inferCredentialName(gitUrl: string): string {
+  try {
+    const url = new URL(gitUrl)
+    const host = url.hostname.replace(/^www\./, '')
+    const parts = url.pathname.split('/').filter(Boolean)
+    const owner = parts[0] || ''
+    return owner ? `${host} - ${owner}` : host
+  } catch {
+    return ''
+  }
+}
 
 type UseProjectEditorParams = {
   session: Session | null
@@ -21,6 +48,9 @@ type UseProjectEditorParams = {
   showConfirm: (message: string) => Promise<boolean>
   loadProjects: () => Promise<void>
   loadProviders: () => Promise<void>
+  savedCredentials: SavedCredential[]
+  loadSavedCredentials: () => Promise<void>
+  createSavedCredential: (name: string, platform: string, token: string) => Promise<SavedCredential | null>
 }
 
 export function useProjectEditor({
@@ -31,7 +61,10 @@ export function useProjectEditor({
   showToast,
   showConfirm,
   loadProjects,
-  loadProviders
+  loadProviders,
+  savedCredentials,
+  loadSavedCredentials,
+  createSavedCredential
 }: UseProjectEditorParams) {
   const [addProjectModalOpen, setAddProjectModalOpen] = useState(false)
   const [addTab, setAddTab] = useState<'manual' | 'provider'>('manual')
@@ -42,6 +75,10 @@ export function useProjectEditor({
   const [gitBranch, setGitBranch] = useState('')
   const [isPrivateRepo, setIsPrivateRepo] = useState(false)
   const [gitToken, setGitToken] = useState('')
+  const [credentialMode, setCredentialMode] = useState<'saved' | 'new'>('new')
+  const [selectedCredentialId, setSelectedCredentialId] = useState('')
+  const [saveNewCredential, setSaveNewCredential] = useState(false)
+  const [newCredentialName, setNewCredentialName] = useState('')
   const [addProjectLoading, setAddProjectLoading] = useState(false)
 
   const [providerSelectId, setProviderSelectId] = useState('')
@@ -93,13 +130,17 @@ export function useProjectEditor({
     setGitBranch('')
     setIsPrivateRepo(false)
     setGitToken('')
+    setCredentialMode(savedCredentials.length > 0 ? 'saved' : 'new')
+    setSelectedCredentialId('')
+    setSaveNewCredential(false)
+    setNewCredentialName('')
     setProviderSelectId('')
     setProviderRepoSearch('')
     setProviderRepos([])
     setProviderSelectedRepos({})
     setBranchCache({})
     await loadProjects()
-    await loadProviders()
+    await Promise.all([loadProviders(), loadSavedCredentials()])
   }
 
   const closeAddProjectModal = useCallback(() => {
@@ -113,6 +154,10 @@ export function useProjectEditor({
     setGitBranch('')
     setIsPrivateRepo(false)
     setGitToken('')
+    setCredentialMode('new')
+    setSelectedCredentialId('')
+    setSaveNewCredential(false)
+    setNewCredentialName('')
     setProviderSelectId('')
     setProviderRepoSearch('')
     setProviderRepos([])
@@ -128,6 +173,26 @@ export function useProjectEditor({
     }
     setAddProjectLoading(true)
     try {
+      // Resolve credentials: saved mode uses savedCredentialId, new mode uses inline token
+      let credentialsPayload: { token: string } | undefined
+      let savedCredentialIdPayload: string | undefined
+
+      if (isPrivateRepo) {
+        if (credentialMode === 'saved' && selectedCredentialId) {
+          savedCredentialIdPayload = selectedCredentialId
+        } else if (credentialMode === 'new' && gitToken) {
+          credentialsPayload = { token: gitToken }
+          // If "remember this token" is checked, save it first
+          if (saveNewCredential) {
+            const credName = newCredentialName.trim() || inferCredentialName(gitUrl.trim())
+            if (credName) {
+              const platform = inferPlatform(gitUrl.trim())
+              await createSavedCredential(credName, platform, gitToken)
+            }
+          }
+        }
+      }
+
       if (addToProjectId) {
         const repoName = extractRepoName(gitUrl.trim())
         const repo: { gitUrl: string; name: string; branch?: string } = {
@@ -135,10 +200,9 @@ export function useProjectEditor({
           name: repoName
         }
         if (gitBranch.trim()) repo.branch = gitBranch.trim()
-        const body: { repos: typeof repo[]; credentials?: { token: string } } = { repos: [repo] }
-        if (isPrivateRepo && gitToken) {
-          body.credentials = { token: gitToken }
-        }
+        const body: { repos: typeof repo[]; credentials?: { token: string }; savedCredentialId?: string } = { repos: [repo] }
+        if (credentialsPayload) body.credentials = credentialsPayload
+        if (savedCredentialIdPayload) body.savedCredentialId = savedCredentialIdPayload
         await apiRequest(`/api/projects/${addToProjectId}/repos`, {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -156,16 +220,14 @@ export function useProjectEditor({
           gitUrl: string
           branch?: string
           credentials?: { token: string }
+          savedCredentialId?: string
         } = {
           name: projectName.trim(),
           gitUrl: gitUrl.trim()
         }
         if (gitBranch.trim()) body.branch = gitBranch.trim()
-        if (isPrivateRepo && gitToken) {
-          body.credentials = {
-            token: gitToken
-          }
-        }
+        if (credentialsPayload) body.credentials = credentialsPayload
+        if (savedCredentialIdPayload) body.savedCredentialId = savedCredentialIdPayload
         await apiRequest('/api/projects', {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -548,6 +610,10 @@ export function useProjectEditor({
     gitBranch,
     isPrivateRepo,
     gitToken,
+    credentialMode,
+    selectedCredentialId,
+    saveNewCredential,
+    newCredentialName,
     addProjectLoading,
     providerSelectId,
     providerRepoSearch,
@@ -591,6 +657,10 @@ export function useProjectEditor({
     setGitBranch,
     setIsPrivateRepo,
     setGitToken,
+    setCredentialMode,
+    setSelectedCredentialId,
+    setSaveNewCredential,
+    setNewCredentialName,
     setProviderRepoSearch,
     setEditTab,
     setEditGitUrl,

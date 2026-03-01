@@ -91,3 +91,11 @@ export type EditRepoSelection = Record<
   string,
   { name: string; branch: string; defaultBranch: string }
 >
+
+export type SavedCredential = {
+  id: string
+  name: string
+  platform: string
+  has_token: boolean
+  created_at: string
+}

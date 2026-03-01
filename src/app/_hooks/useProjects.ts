@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback } from 'react'
-import type { Session, ToastType } from '../_types'
+import type { SavedCredential, Session, ToastType } from '../_types'
 import { useChat } from './useChat'
 import { useProjectEditor } from './useProjectEditor'
 import { useProjectList } from './useProjectList'
@@ -14,6 +14,9 @@ type UseProjectsParams = {
   showToast: (message: string, type?: ToastType, duration?: number) => void
   showConfirm: (message: string) => Promise<boolean>
   loadProviders: () => Promise<void>
+  savedCredentials: SavedCredential[]
+  loadSavedCredentials: () => Promise<void>
+  createSavedCredential: (name: string, platform: string, token: string) => Promise<SavedCredential | null>
   initialProjectId?: string | null
   onSelectedProjectChange?: (projectId: string | null) => void
 }
@@ -26,6 +29,9 @@ export function useProjects({
   showToast,
   showConfirm,
   loadProviders,
+  savedCredentials,
+  loadSavedCredentials,
+  createSavedCredential,
   initialProjectId,
   onSelectedProjectChange
 }: UseProjectsParams) {
@@ -58,7 +64,10 @@ export function useProjects({
     showToast,
     showConfirm,
     loadProjects: list.loadProjects,
-    loadProviders
+    loadProviders,
+    savedCredentials,
+    loadSavedCredentials,
+    createSavedCredential
   })
 
   const { handleDeleteProject: deleteProject } = list
@@ -91,6 +100,10 @@ export function useProjects({
     gitBranch: editor.gitBranch,
     isPrivateRepo: editor.isPrivateRepo,
     gitToken: editor.gitToken,
+    credentialMode: editor.credentialMode,
+    selectedCredentialId: editor.selectedCredentialId,
+    saveNewCredential: editor.saveNewCredential,
+    newCredentialName: editor.newCredentialName,
     addProjectLoading: editor.addProjectLoading,
     providerSelectId: editor.providerSelectId,
     providerRepoSearch: editor.providerRepoSearch,
@@ -151,6 +164,10 @@ export function useProjects({
     setGitBranch: editor.setGitBranch,
     setIsPrivateRepo: editor.setIsPrivateRepo,
     setGitToken: editor.setGitToken,
+    setCredentialMode: editor.setCredentialMode,
+    setSelectedCredentialId: editor.setSelectedCredentialId,
+    setSaveNewCredential: editor.setSaveNewCredential,
+    setNewCredentialName: editor.setNewCredentialName,
     setProviderRepoSearch: editor.setProviderRepoSearch,
     setEditTab: editor.setEditTab,
     setEditGitUrl: editor.setEditGitUrl,
