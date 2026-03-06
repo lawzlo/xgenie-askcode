@@ -113,6 +113,7 @@
       padding: 2px 4px;
       border: 1px solid #828282;
       width: 400px;
+      max-width: 100%;
     }
     .form-input:focus { outline: none; border-color: #ff6600; }
     .form-checkbox {
@@ -785,4 +786,151 @@
       padding-top: 10px;
       border-top: 1px solid #e0e0d8;
       font-size: 9pt;
+    }
+
+    /* ===== Mobile Responsive ===== */
+    @media (max-width: 768px) {
+      /* Header */
+      .header { padding: 4px 0; }
+      .header-inner {
+        max-width: 100%;
+        padding: 0 12px;
+        flex-wrap: wrap;
+      }
+      .nav-links { display: none !important; }
+      .header-right {
+        font-size: 9pt;
+        gap: 4px;
+      }
+      .header-right select {
+        max-width: 110px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Main layout */
+      .main {
+        max-width: 100%;
+        padding: 10px 12px;
+      }
+      .footer {
+        max-width: 100%;
+        margin: 20px 12px 10px;
+      }
+
+      /* Forms — stack label above input */
+      .form-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .form-label {
+        width: auto;
+        margin-bottom: 2px;
+      }
+      .form-input { width: 100% !important; }
+      .form-actions { margin-left: 0; }
+      .form-checkbox { margin-left: 0; }
+      .credentials {
+        margin-left: 0;
+        padding: 8px;
+      }
+      .credentials .form-label { width: auto; }
+      .credentials .form-input { width: 100% !important; }
+      .credentials-hint { margin-left: 0; }
+
+      /* Auth modal */
+      .auth-modal .form-input { width: 100% !important; }
+      .auth-modal .form-label { width: auto; }
+      .auth-modal .form-actions { margin-left: 0; }
+      .auth-error, .auth-success, .auth-switch { margin-left: 0; }
+
+      /* Modals */
+      .modal-overlay {
+        padding: 16px 10px;
+        align-items: flex-start;
+        padding-top: 30px;
+      }
+      .modal-content {
+        max-width: 100% !important;
+        width: 100%;
+      }
+
+      /* Landing page */
+      .landing { padding: 10px 0; }
+      .landing-hero { padding: 20px 0 25px; }
+      .landing-hero h1 { font-size: 16pt; }
+      .landing-tagline { font-size: 10pt; }
+      .landing-features {
+        grid-template-columns: 1fr;
+        gap: 15px;
+        padding: 20px 0;
+      }
+      .feature { text-align: left; }
+      .how-steps {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .how-arrow { display: none; }
+
+      /* Project list */
+      .project-meta {
+        margin-left: 0;
+        padding-left: 30px;
+      }
+
+      /* Chat */
+      .chat-message { padding: 8px; }
+      .conversation-header {
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      /* iOS zoom prevention — inputs < 16px trigger zoom on focus */
+      .question-input,
+      .form-input,
+      input[type="text"],
+      input[type="email"],
+      input[type="password"],
+      textarea,
+      select {
+        font-size: 16px !important;
+      }
+
+      /* Bigger touch targets */
+      .submit-btn { padding: 6px 16px; font-size: 10pt; }
+      .cta-btn { padding: 10px 24px; }
+      .template-btn { padding: 6px 10px; }
+      .share-btn { padding: 6px 16px; }
+      .link-button { padding: 2px 0; }
+      .tab { padding: 8px 12px; }
+
+      /* Toast — full width on mobile */
+      .toast {
+        left: 12px;
+        right: 12px;
+        max-width: none;
+      }
+
+      /* Confirm dialog */
+      .confirm-dialog { max-width: calc(100vw - 40px); }
+
+      /* Repo list */
+      .repo-item { flex-wrap: wrap; }
+
+      /* Suggestions wrap better */
+      .question-templates { gap: 5px; }
+
+      /* Saved modal */
+      .saved-list { max-height: 60vh; }
+    }
+
+    @media (max-width: 400px) {
+      .landing-cta {
+        flex-direction: column;
+        gap: 8px;
+      }
+      .landing-cta .cta-btn { width: 100%; }
+      .header-inner { gap: 4px; }
+      .header-right select { max-width: 90px; }
     }
