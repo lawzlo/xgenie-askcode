@@ -42,7 +42,9 @@ export function useProviders({
       case 'gitea':
       case 'gitlab':
       case 'bitbucket':
-        return !!provider.access_token
+        if (!provider.access_token) return false
+        if (provider.token_expires_at && new Date(provider.token_expires_at) < new Date()) return false
+        return true
       default:
         return false
     }

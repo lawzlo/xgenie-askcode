@@ -34,6 +34,7 @@ export type GitProvider = {
   name: string
   account_name?: string | null
   access_token?: string | null
+  token_expires_at?: string | null
   github_installation_id?: string | null
 }
 
