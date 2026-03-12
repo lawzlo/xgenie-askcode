@@ -33,7 +33,6 @@ type ProvidersModalProps = {
   onConnectGithub: () => void
   onConnectGitea: () => void
   onDeleteProvider: (providerId: string) => void
-  onReconnectProvider: (providerId: string) => void
   onClose: () => void
 }
 
@@ -67,7 +66,6 @@ export function ProvidersModal({
   onConnectGithub,
   onConnectGitea,
   onDeleteProvider,
-  onReconnectProvider,
   onClose
 }: ProvidersModalProps) {
   const [showGiteaSecret, setShowGiteaSecret] = useState(false)
@@ -251,18 +249,7 @@ export function ProvidersModal({
                     {isProviderConnected(provider) ? (
                       <span style={{ color: '#609926' }}>connected</span>
                     ) : (
-                      <>
-                        <span style={{ color: '#c00' }}>not connected</span>
-                        {provider.provider !== 'github' ? (
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={() => void onReconnectProvider(provider.id)}
-                          >
-                            reconnect
-                          </button>
-                        ) : null}
-                      </>
+                      <span style={{ color: '#c00' }}>not connected</span>
                     )}
                     <button
                       type="button"

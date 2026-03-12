@@ -160,26 +160,6 @@ export function useProviders({
     }
   }
 
-  async function handleReconnectProvider(providerId: string) {
-    try {
-      const data = await apiRequest<{ oauth_url?: string }>(`/api/git-providers/${providerId}`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        onUnauthorized: clearSession
-      })
-      if (data.oauth_url) {
-        window.open(data.oauth_url, '_blank')
-        showToast('Please complete authorization in the new window, then refresh this page.', 'info', 0)
-      }
-    } catch (err) {
-      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
-        return
-      }
-      const message = err instanceof Error ? err.message : 'Failed to reconnect provider'
-      showToast(message, 'error')
-    }
-  }
-
   async function handleDeleteProvider(providerId: string) {
     const confirmed = await showConfirm('Remove this provider?')
     if (!confirmed) return
@@ -227,7 +207,6 @@ export function useProviders({
     closeProvidersModal,
     handleConnectGitea,
     handleConnectGithub,
-    handleReconnectProvider,
     handleDeleteProvider,
     setShowGithubForm,
     setShowGiteaForm,
