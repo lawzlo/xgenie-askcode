@@ -94,6 +94,7 @@ export async function requireTeamId(
 }
 
 export function getRequestOrigin(request: Request): string {
+  if (process.env.APP_URL) return process.env.APP_URL
   const proto = request.headers.get('x-forwarded-proto') || 'http'
   const host =
     request.headers.get('x-forwarded-host') ||
