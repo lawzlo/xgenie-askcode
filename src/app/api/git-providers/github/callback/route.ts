@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getGitProviderById, updateGitHubAppInstallation } from '../../../../../services/git-provider'
-import { optionsResponse, withCors } from '../../../../../server/api'
+import { getRequestOrigin, optionsResponse, withCors } from '../../../../../server/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  const baseUrl = `${url.protocol}//${url.host}`
+  const baseUrl = getRequestOrigin(request)
 
   try {
     const installationId = url.searchParams.get('installation_id')

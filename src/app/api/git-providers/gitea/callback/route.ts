@@ -1,5 +1,5 @@
 import { DEFAULT_GITEA_URL, getGitProviderById, updateGitProviderTokens } from '../../../../../services/git-provider'
-import { optionsResponse, withCors } from '../../../../../server/api'
+import { getRequestOrigin, optionsResponse, withCors } from '../../../../../server/api'
 import { NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url)
-    const baseUrl = `${url.protocol}//${url.host}`
+    const baseUrl = getRequestOrigin(request)
     const code = url.searchParams.get('code')
     const state = url.searchParams.get('state')
 
@@ -102,8 +102,7 @@ export async function GET(request: Request) {
     return withCors(NextResponse.redirect(`${baseUrl}/?provider_connected=gitea`))
   } catch (error) {
     console.error('Gitea callback error:', error)
-    const url = new URL(request.url)
-    const baseUrl = `${url.protocol}//${url.host}`
+    const baseUrl = getRequestOrigin(request)
     return withCors(NextResponse.redirect(`${baseUrl}/?error=callback_failed`))
   }
 }
