@@ -431,7 +431,6 @@ export default function HomePageClient() {
           onConnectGithub={() => void providers.handleConnectGithub()}
           onConnectGitea={() => void providers.handleConnectGitea()}
           onDeleteProvider={(providerId) => void providers.handleDeleteProvider(providerId)}
-          onReconnectProvider={(providerId) => void providers.handleReconnectProvider(providerId)}
           onClose={providers.closeProvidersModal}
         />
 

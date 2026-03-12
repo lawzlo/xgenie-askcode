@@ -97,11 +97,16 @@ export function useProjectList({
   const handleSyncProject = useCallback(
     async (projectId: string) => {
       try {
-        await apiRequest(`/api/projects/${projectId}/sync`, {
+        const data = await apiRequest<{ needs_reauth?: boolean; oauth_url?: string }>(`/api/projects/${projectId}/sync`, {
           method: 'POST',
           headers: getAuthHeaders(),
           onUnauthorized: clearSession
         })
+        if (data.needs_reauth && data.oauth_url) {
+          window.open(data.oauth_url, '_blank')
+          showToast('Provider token expired. Please authorize in the new window, then sync again.', 'info', 0)
+          return
+        }
         await loadProjects()
       } catch (err) {
         if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
