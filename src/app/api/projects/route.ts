@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { createProject, listProjects } from '../../../services/project'
+import { getSavedCredential } from '../../../services/saved-credential'
 import { requireAuth, requireTeamId, jsonResponse, optionsResponse, parseJson } from '../../../server/api'
 
 export const runtime = 'nodejs'
@@ -14,7 +15,8 @@ const CreateProjectSchema = z.object({
       token: z.string()
     })
     .optional(),
-  gitProviderId: z.string().uuid().optional()
+  gitProviderId: z.string().uuid().optional(),
+  savedCredentialId: z.string().uuid().optional()
 })
 
 export async function GET(request: Request) {
@@ -53,7 +55,18 @@ export async function POST(request: Request) {
       return jsonResponse({ error: 'Invalid request', details: parsed.error.errors }, 400)
     }
 
-    const project = await createProject(auth.user!.id, team.teamId!, parsed.data)
+    // Resolve savedCredentialId to inline credentials
+    const projectData = { ...parsed.data }
+    if (projectData.savedCredentialId && !projectData.credentials) {
+      const saved = await getSavedCredential(projectData.savedCredentialId, team.teamId!)
+      if (!saved) {
+        return jsonResponse({ error: 'Saved credential not found' }, 404)
+      }
+      projectData.credentials = saved.credentials
+    }
+    delete projectData.savedCredentialId
+
+    const project = await createProject(auth.user!.id, team.teamId!, projectData)
     return jsonResponse(
       {
         ...project,

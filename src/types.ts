@@ -53,6 +53,7 @@ export interface CreateProjectRequest {
     token: string
   }
   gitProviderId?: string
+  savedCredentialId?: string
 }
 
 export interface RepoInfo {

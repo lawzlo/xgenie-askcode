@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { supabase } from '../lib/supabase'
 import { processProjectJob, type ProjectJob } from '../services/project'
+import { refreshGiteaToken, type GitProvider } from '../services/git-provider'
 
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID()}`
 const POLL_INTERVAL_MS = Number(process.env.JOB_POLL_INTERVAL_MS || 2000)
@@ -8,9 +9,11 @@ const IDLE_DELAY_MS = Number(process.env.JOB_IDLE_DELAY_MS || 4000)
 const MAX_BACKOFF_MS = Number(process.env.JOB_MAX_BACKOFF_MS || 30000)
 const STALE_JOB_TIMEOUT_MS = Number(process.env.JOB_STALE_TIMEOUT_MS || 10 * 60 * 1000) // 10 minutes
 const STALE_CHECK_INTERVAL_MS = 60 * 1000 // Check every minute
+const TOKEN_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000 // Refresh tokens daily
 
 let shouldStop = false
 let lastStaleCheck = 0
+let lastTokenRefresh = 0
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -19,6 +22,29 @@ function sleep(ms: number) {
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message
   return 'Unknown error'
+}
+
+async function refreshProviderTokens() {
+  const { data: providers, error } = await supabase
+    .from('git_providers')
+    .select('*')
+    .eq('provider', 'gitea')
+
+  if (error) {
+    console.error('[worker] Failed to fetch git providers for token refresh:', error)
+    return
+  }
+
+  for (const provider of (providers || []) as GitProvider[]) {
+    try {
+      const token = await refreshGiteaToken(provider)
+      if (token) {
+        console.log(`[worker] Refreshed token for provider ${provider.name} (${provider.id})`)
+      }
+    } catch (err) {
+      console.error(`[worker] Failed to refresh token for provider ${provider.name}:`, getErrorMessage(err))
+    }
+  }
 }
 
 async function resetStaleJobs() {
@@ -109,15 +135,23 @@ async function handleJob(job: ProjectJob) {
 async function loop() {
   console.log(`[worker] Starting with id ${WORKER_ID}`)
 
-  // Reset stale jobs on startup
+  // Reset stale jobs and refresh tokens on startup
   await resetStaleJobs()
+  await refreshProviderTokens()
   lastStaleCheck = Date.now()
+  lastTokenRefresh = Date.now()
 
   while (!shouldStop) {
     // Periodically check for stale jobs
     if (Date.now() - lastStaleCheck > STALE_CHECK_INTERVAL_MS) {
       await resetStaleJobs()
       lastStaleCheck = Date.now()
+    }
+
+    // Periodically refresh provider tokens
+    if (Date.now() - lastTokenRefresh > TOKEN_REFRESH_INTERVAL_MS) {
+      await refreshProviderTokens()
+      lastTokenRefresh = Date.now()
     }
 
     const job = await claimJob()

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { addReposToProject, removeRepoFromProject } from '../../../../../services/project'
+import { getSavedCredential } from '../../../../../services/saved-credential'
 import {
   jsonResponse,
   optionsResponse,
@@ -29,7 +30,8 @@ const AddReposSchema = z.object({
   gitProviderId: z.string().uuid().optional(),
   credentials: z.object({
     token: z.string()
-  }).optional()
+  }).optional(),
+  savedCredentialId: z.string().uuid().optional()
 })
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -55,12 +57,22 @@ export async function POST(request: NextRequest, { params }: Params) {
       return jsonResponse({ error: 'Duplicate repos in request' }, 400)
     }
 
+    // Resolve savedCredentialId to inline credentials
+    let credentials = parsed.data.credentials
+    if (parsed.data.savedCredentialId && !credentials) {
+      const saved = await getSavedCredential(parsed.data.savedCredentialId, team.teamId!)
+      if (!saved) {
+        return jsonResponse({ error: 'Saved credential not found' }, 404)
+      }
+      credentials = saved.credentials
+    }
+
     const project = await addReposToProject(
       id,
       team.teamId!,
       parsed.data.repos,
       parsed.data.gitProviderId,
-      parsed.data.credentials
+      credentials
     )
     return jsonResponse(project)
   } catch (error) {

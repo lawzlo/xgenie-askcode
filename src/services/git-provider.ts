@@ -324,7 +324,8 @@ export async function refreshGiteaToken(provider: GitProvider): Promise<string |
   })
 
   if (!response.ok) {
-    console.error('Failed to refresh Gitea token')
+    const body = await response.text().catch(() => '')
+    console.error(`Failed to refresh Gitea token for provider ${provider.id}: ${response.status} ${response.statusText} ${body}`)
     return provider.access_token
   }
 

@@ -57,7 +57,7 @@ async function generateSuggestions(projectName: string, files: string[]): Promis
   const fileList = files.slice(0, 30).join('\n')
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-5-20251101',
+    model: 'claude-sonnet-4-6',
     max_tokens: 500,
     messages: [
       {
