@@ -77,7 +77,6 @@ export function useProjectEditor({
   const [gitToken, setGitToken] = useState('')
   const [credentialMode, setCredentialMode] = useState<'saved' | 'new'>('new')
   const [selectedCredentialId, setSelectedCredentialId] = useState('')
-  const [saveNewCredential, setSaveNewCredential] = useState(false)
   const [newCredentialName, setNewCredentialName] = useState('')
   const [addProjectLoading, setAddProjectLoading] = useState(false)
 
@@ -120,6 +119,13 @@ export function useProjectEditor({
     }
   }, [session])
 
+  useEffect(() => {
+    if (isPrivateRepo && credentialMode === 'new' && gitUrl && !newCredentialName) {
+      const inferred = inferCredentialName(gitUrl)
+      if (inferred) setNewCredentialName(inferred)
+    }
+  }, [isPrivateRepo, credentialMode, gitUrl, newCredentialName])
+
   async function openAddProjectModal() {
     setAddProjectModalOpen(true)
     setAddTab('manual')
@@ -132,7 +138,6 @@ export function useProjectEditor({
     setGitToken('')
     setCredentialMode(savedCredentials.length > 0 ? 'saved' : 'new')
     setSelectedCredentialId('')
-    setSaveNewCredential(false)
     setNewCredentialName('')
     setProviderSelectId('')
     setProviderRepoSearch('')
@@ -156,7 +161,6 @@ export function useProjectEditor({
     setGitToken('')
     setCredentialMode('new')
     setSelectedCredentialId('')
-    setSaveNewCredential(false)
     setNewCredentialName('')
     setProviderSelectId('')
     setProviderRepoSearch('')
@@ -182,13 +186,11 @@ export function useProjectEditor({
           savedCredentialIdPayload = selectedCredentialId
         } else if (credentialMode === 'new' && gitToken) {
           credentialsPayload = { token: gitToken }
-          // If "remember this token" is checked, save it first
-          if (saveNewCredential) {
-            const credName = newCredentialName.trim() || inferCredentialName(gitUrl.trim())
-            if (credName) {
-              const platform = inferPlatform(gitUrl.trim())
-              await createSavedCredential(credName, platform, gitToken)
-            }
+          // Always save the credential for reuse
+          const credName = newCredentialName.trim() || inferCredentialName(gitUrl.trim())
+          if (credName) {
+            const platform = inferPlatform(gitUrl.trim())
+            await createSavedCredential(credName, platform, gitToken)
           }
         }
       }
@@ -612,7 +614,6 @@ export function useProjectEditor({
     gitToken,
     credentialMode,
     selectedCredentialId,
-    saveNewCredential,
     newCredentialName,
     addProjectLoading,
     providerSelectId,
@@ -659,7 +660,6 @@ export function useProjectEditor({
     setGitToken,
     setCredentialMode,
     setSelectedCredentialId,
-    setSaveNewCredential,
     setNewCredentialName,
     setProviderRepoSearch,
     setEditTab,

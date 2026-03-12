@@ -1,6 +1,6 @@
 'use client'
 
-import type { FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import type { GitProvider, Project, ProviderRepo, ProviderSelection, SavedCredential } from '../_types'
 import { inferCredentialName } from '../_hooks/useProjectEditor'
 
@@ -28,8 +28,6 @@ type AddProjectModalProps = {
   onCredentialModeChange: (mode: 'saved' | 'new') => void
   selectedCredentialId: string
   onSelectedCredentialChange: (id: string) => void
-  saveNewCredential: boolean
-  onSaveNewCredentialChange: (checked: boolean) => void
   newCredentialName: string
   onNewCredentialNameChange: (value: string) => void
   savedCredentials: SavedCredential[]
@@ -77,8 +75,6 @@ export function AddProjectModal({
   onCredentialModeChange,
   selectedCredentialId,
   onSelectedCredentialChange,
-  saveNewCredential,
-  onSaveNewCredentialChange,
   newCredentialName,
   onNewCredentialNameChange,
   savedCredentials,
@@ -101,6 +97,7 @@ export function AddProjectModal({
   onOpenProvidersFromAdd,
   onClose
 }: AddProjectModalProps) {
+  const [showToken, setShowToken] = useState(false)
   if (!open) return null
   return (
     <div
@@ -216,13 +213,23 @@ export function AddProjectModal({
                   <>
                     <div className="form-row">
                       <span className="form-label">token:</span>
-                      <input
-                        type="password"
-                        className="form-input"
-                        placeholder="personal access token"
-                        value={gitToken}
-                        onChange={(event) => onGitTokenChange(event.target.value)}
-                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                        <input
+                          type={showToken ? 'text' : 'password'}
+                          className="form-input"
+                          placeholder="personal access token"
+                          value={gitToken}
+                          onChange={(event) => onGitTokenChange(event.target.value)}
+                          style={{ flex: 1 }}
+                        />
+                        <span
+                          className="link-button"
+                          style={{ fontSize: '8pt', whiteSpace: 'nowrap' }}
+                          onClick={() => setShowToken(!showToken)}
+                        >
+                          {showToken ? 'hide' : 'show'}
+                        </span>
+                      </div>
                     </div>
                     {savedCredentials.length > 0 ? (
                       <div style={{ marginBottom: 6 }}>
@@ -238,26 +245,16 @@ export function AddProjectModal({
                         </span>
                       </div>
                     ) : null}
-                    <div className="form-checkbox" style={{ marginBottom: 4 }}>
+                    <div className="form-row">
+                      <span className="form-label">save as:</span>
                       <input
-                        type="checkbox"
-                        checked={saveNewCredential}
-                        onChange={(event) => onSaveNewCredentialChange(event.target.checked)}
+                        type="text"
+                        className="form-input"
+                        placeholder={inferCredentialName(gitUrl) || 'e.g. github.com - myorg'}
+                        value={newCredentialName}
+                        onChange={(event) => onNewCredentialNameChange(event.target.value)}
                       />
-                      <label>remember this token</label>
                     </div>
-                    {saveNewCredential ? (
-                      <div className="form-row" style={{ marginLeft: 20 }}>
-                        <span className="form-label">name:</span>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder={inferCredentialName(gitUrl) || 'e.g. github.com - myorg'}
-                          value={newCredentialName}
-                          onChange={(event) => onNewCredentialNameChange(event.target.value)}
-                        />
-                      </div>
-                    ) : null}
                     <div className="credentials-hint">
                       Use a personal access token from your Git provider (GitHub, GitLab, Bitbucket, etc.)
                     </div>

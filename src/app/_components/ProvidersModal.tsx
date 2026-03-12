@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import type { GitProvider } from '../_types'
 
 type ProvidersModalProps = {
@@ -32,6 +33,7 @@ type ProvidersModalProps = {
   onConnectGithub: () => void
   onConnectGitea: () => void
   onDeleteProvider: (providerId: string) => void
+  onReconnectProvider: (providerId: string) => void
   onClose: () => void
 }
 
@@ -65,8 +67,10 @@ export function ProvidersModal({
   onConnectGithub,
   onConnectGitea,
   onDeleteProvider,
+  onReconnectProvider,
   onClose
 }: ProvidersModalProps) {
+  const [showGiteaSecret, setShowGiteaSecret] = useState(false)
   if (!open) return null
   return (
     <div
@@ -194,14 +198,23 @@ export function ProvidersModal({
             </div>
             <div className="form-row">
               <span className="form-label">Client Secret:</span>
-              <input
-                type="password"
-                className="form-input"
-                placeholder="from OAuth App"
-                style={{ width: 300 }}
-                value={giteaClientSecret}
-                onChange={(event) => onGiteaClientSecretChange(event.target.value)}
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type={showGiteaSecret ? 'text' : 'password'}
+                  className="form-input"
+                  placeholder="from OAuth App"
+                  style={{ width: 270 }}
+                  value={giteaClientSecret}
+                  onChange={(event) => onGiteaClientSecretChange(event.target.value)}
+                />
+                <span
+                  className="link-button"
+                  style={{ fontSize: '8pt', whiteSpace: 'nowrap' }}
+                  onClick={() => setShowGiteaSecret(!showGiteaSecret)}
+                >
+                  {showGiteaSecret ? 'hide' : 'show'}
+                </span>
+              </div>
             </div>
             <div style={{ fontSize: '8pt', color: '#828282', margin: '10px 0' }}>
               Create OAuth App at: {`{your-gitea}/user/settings/applications`}
@@ -238,7 +251,18 @@ export function ProvidersModal({
                     {isProviderConnected(provider) ? (
                       <span style={{ color: '#609926' }}>connected</span>
                     ) : (
-                      <span style={{ color: '#c00' }}>not connected</span>
+                      <>
+                        <span style={{ color: '#c00' }}>not connected</span>
+                        {provider.provider !== 'github' ? (
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => void onReconnectProvider(provider.id)}
+                          >
+                            reconnect
+                          </button>
+                        ) : null}
+                      </>
                     )}
                     <button
                       type="button"

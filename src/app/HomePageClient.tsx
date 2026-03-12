@@ -338,8 +338,6 @@ export default function HomePageClient() {
           onCredentialModeChange={projects.setCredentialMode}
           selectedCredentialId={projects.selectedCredentialId}
           onSelectedCredentialChange={projects.setSelectedCredentialId}
-          saveNewCredential={projects.saveNewCredential}
-          onSaveNewCredentialChange={projects.setSaveNewCredential}
           newCredentialName={projects.newCredentialName}
           onNewCredentialNameChange={projects.setNewCredentialName}
           savedCredentials={savedCreds.savedCredentials}
@@ -433,6 +431,7 @@ export default function HomePageClient() {
           onConnectGithub={() => void providers.handleConnectGithub()}
           onConnectGitea={() => void providers.handleConnectGitea()}
           onDeleteProvider={(providerId) => void providers.handleDeleteProvider(providerId)}
+          onReconnectProvider={(providerId) => void providers.handleReconnectProvider(providerId)}
           onClose={providers.closeProvidersModal}
         />
 
