@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { supabase } from '../lib/supabase'
-import { processProjectJob, type ProjectJob } from '../services/project'
+import { formatProjectSyncError, processProjectJob, type ProjectJob, updateProjectSyncState } from '../services/project'
 import { refreshGiteaToken, type GitProvider } from '../services/git-provider'
 
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID()}`
@@ -108,12 +108,17 @@ async function handleJob(job: ProjectJob) {
     })
     console.log(`[worker] Job ${job.id} completed`) 
   } catch (error) {
-    const message = getErrorMessage(error)
+    const message = formatProjectSyncError(error)
     const shouldRetry = job.attempts < job.max_attempts
     const backoff = Math.min(MAX_BACKOFF_MS, POLL_INTERVAL_MS * job.attempts * 2)
 
     if (shouldRetry) {
       console.warn(`[worker] Job ${job.id} failed, retrying in ${backoff}ms: ${message}`)
+      try {
+        await updateProjectSyncState(job.project_id, 'pending')
+      } catch (stateError) {
+        console.error(`[worker] Failed to reset project state for job ${job.id}:`, getErrorMessage(stateError))
+      }
       await updateJob(job.id, {
         status: 'queued',
         run_after: new Date(Date.now() + backoff).toISOString(),
@@ -122,6 +127,11 @@ async function handleJob(job: ProjectJob) {
       })
     } else {
       console.error(`[worker] Job ${job.id} failed permanently: ${message}`)
+      try {
+        await updateProjectSyncState(job.project_id, 'error', { syncError: message })
+      } catch (stateError) {
+        console.error(`[worker] Failed to persist project sync error for job ${job.id}:`, getErrorMessage(stateError))
+      }
       await updateJob(job.id, {
         status: 'error',
         finished_at: new Date().toISOString(),

@@ -16,6 +16,7 @@ export interface Project {
     token: string
   }
   syncStatus: SyncStatus
+  syncError?: string | null
 }
 
 export interface Message {

@@ -3,6 +3,17 @@
 import type { Project } from '../_types'
 import { timeAgo, truncateUrl } from '../_lib/utils'
 
+function getSyncErrorText(syncError?: string | null): string {
+  const message = syncError?.replace(/\s+/g, ' ').trim()
+  return message || 'Unknown reason'
+}
+
+function truncateSyncError(syncError?: string | null, maxLength = 140): string {
+  const message = getSyncErrorText(syncError)
+  if (message.length <= maxLength) return message
+  return `${message.slice(0, maxLength - 3)}...`
+}
+
 type ProjectListProps = {
   projectsLoading: boolean
   projects: Project[]
@@ -75,6 +86,7 @@ export function ProjectList({
           const isSyncing = project.syncStatus === 'syncing' || project.syncStatus === 'pending'
           const isError = project.syncStatus === 'error'
           const isDisabled = isSyncing
+          const syncErrorText = getSyncErrorText(project.syncError)
 
           return (
             <div key={project.id}>
@@ -94,7 +106,14 @@ export function ProjectList({
                 >
                   {project.name}
                 </button>
-                {isError && <span style={{ marginLeft: 8, color: '#c00', fontSize: '9pt' }}>sync failed</span>}
+                {isError && (
+                  <span
+                    style={{ marginLeft: 8, color: '#c00', fontSize: '9pt' }}
+                    title={syncErrorText}
+                  >
+                    sync failed
+                  </span>
+                )}
               </div>
               <div className="project-meta">
                 {isFullAccess && (
@@ -155,6 +174,11 @@ export function ProjectList({
                     </>
                   )}
                 </div>
+                {isError && (
+                  <div style={{ marginTop: 4, color: '#c00', fontSize: '9pt' }} title={syncErrorText}>
+                    sync failed: {truncateSyncError(project.syncError)}
+                  </div>
+                )}
               </div>
             </div>
           )
