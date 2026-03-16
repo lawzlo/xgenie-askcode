@@ -64,6 +64,7 @@ export type Project = {
   lastSyncedAt?: string | null
   gitUrls?: ProjectRepo[] | null
   syncStatus?: SyncStatus
+  syncError?: string | null
 }
 
 export type Message = {
