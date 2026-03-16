@@ -1,5 +1,5 @@
 import type { NextRequest } from 'next/server'
-import { getProject, syncProject } from '../../../../../services/project'
+import { formatProjectSyncError, getProject, syncProject, updateProjectSyncState } from '../../../../../services/project'
 import { getGitProvider, refreshGiteaToken } from '../../../../../services/git-provider'
 import { getRequestOrigin, jsonResponse, optionsResponse, requireAuth, requireTeamId } from '../../../../../server/api'
 
@@ -18,8 +18,12 @@ function buildOAuthUrl(provider: { api_url: string | null; client_id: string | n
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
+  let projectId: string | null = null
+  let knownProjectId: string | null = null
+
   try {
     const { id } = await params
+    projectId = id
     const auth = await requireAuth(request)
     if (auth.response) return auth.response
 
@@ -31,6 +35,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!project) {
       return jsonResponse({ error: 'Project not found' }, 404)
     }
+    knownProjectId = project.id
 
     if (project.gitProviderId) {
       const provider = await getGitProvider(project.gitProviderId, project.teamId)
@@ -60,10 +65,22 @@ export async function POST(request: NextRequest, { params }: Params) {
       202
     )
   } catch (error) {
-    if (error instanceof Error && error.message.includes('not found')) {
+    const message = formatProjectSyncError(error)
+
+    if (/^project not found\b/i.test(message)) {
       return jsonResponse({ error: 'Project not found' }, 404)
     }
-    return jsonResponse({ error: 'Failed to sync project' }, 500)
+
+    if (knownProjectId || projectId) {
+      try {
+        await updateProjectSyncState(knownProjectId || projectId!, 'error', { syncError: message })
+      } catch (stateError) {
+        console.error('Failed to persist sync initiation error:', formatProjectSyncError(stateError))
+      }
+    }
+
+    console.error('Failed to sync project:', message)
+    return jsonResponse({ error: message }, 500)
   }
 }
 
