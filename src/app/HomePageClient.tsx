@@ -341,7 +341,6 @@ export default function HomePageClient() {
           newCredentialName={projects.newCredentialName}
           onNewCredentialNameChange={projects.setNewCredentialName}
           savedCredentials={savedCreds.savedCredentials}
-          onDeleteSavedCredential={savedCreds.deleteSavedCredential}
           addProjectLoading={projects.addProjectLoading}
           onSubmitAddProject={projects.handleAddProject}
           connectedProviders={providers.connectedProviders}
@@ -368,6 +367,7 @@ export default function HomePageClient() {
           open={projects.editProjectModalOpen}
           editingProject={projects.editingProject}
           editingProjectRepos={projects.editingProjectRepos}
+          branchCache={projects.branchCache}
           editTab={projects.editTab}
           onSelectManualTab={() => projects.setEditTab('manual')}
           onSelectProviderTab={() => {
@@ -388,8 +388,12 @@ export default function HomePageClient() {
           onEditRepoSearchChange={projects.setEditRepoSearch}
           filteredEditRepos={projects.filteredEditRepos}
           editSelectedRepos={projects.editSelectedRepos}
+          editExistingRepoBranches={projects.editExistingRepoBranches}
+          editExistingRepoSavingUrl={projects.editExistingRepoSavingUrl}
           onToggleEditRepo={projects.toggleEditRepo}
           onUpdateEditRepoBranch={projects.updateEditRepoBranch}
+          onEditExistingRepoBranchChange={projects.updateExistingRepoBranchInput}
+          onUpdateExistingRepoBranch={(repoUrl) => void projects.handleUpdateExistingRepoBranch(repoUrl)}
           onAddSelectedRepos={() => void projects.handleAddSelectedReposToProject()}
           onRemoveRepo={(repoUrl) => void projects.handleRemoveRepo(repoUrl)}
           onClose={projects.closeEditProjectModal}

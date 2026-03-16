@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { addReposToProject, removeRepoFromProject } from '../../../../../services/project'
+import { addReposToProject, removeRepoFromProject, updateProjectRepoBranch } from '../../../../../services/project'
 import { getSavedCredential } from '../../../../../services/saved-credential'
 import {
   jsonResponse,
@@ -32,6 +32,11 @@ const AddReposSchema = z.object({
     token: z.string()
   }).optional(),
   savedCredentialId: z.string().uuid().optional()
+})
+
+const UpdateRepoBranchSchema = z.object({
+  repoUrl: z.string().url(),
+  branch: z.string().min(1)
 })
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -120,6 +125,45 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return jsonResponse(
       {
         error: 'Failed to remove repo',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
+      500
+    )
+  }
+}
+
+export async function PATCH(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params
+    const auth = await requireAuth(request)
+    if (auth.response) return auth.response
+
+    const team = await requireTeamId(request, auth.user!.id)
+    if (team.response) return team.response
+
+    const parsedBody = await parseJson<z.infer<typeof UpdateRepoBranchSchema>>(request)
+    if (parsedBody.response) return parsedBody.response
+
+    const parsed = UpdateRepoBranchSchema.safeParse(parsedBody.data)
+    if (!parsed.success) {
+      return jsonResponse({ error: 'Invalid request', details: parsed.error.errors }, 400)
+    }
+
+    const project = await updateProjectRepoBranch(
+      id,
+      team.teamId!,
+      parsed.data.repoUrl,
+      parsed.data.branch
+    )
+    return jsonResponse(project)
+  } catch (error) {
+    console.error('Failed to update repo branch:', error)
+    if (error instanceof Error && error.message.includes('not found')) {
+      return jsonResponse({ error: error.message }, 404)
+    }
+    return jsonResponse(
+      {
+        error: 'Failed to update repo branch',
         message: error instanceof Error ? error.message : 'Unknown error'
       },
       500

@@ -4,13 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   EditRepoSelection,
   Project,
+  ProjectRepo,
   ProviderRepo,
   ProviderSelection,
   SavedCredential,
   Session,
   ToastType
 } from '../_types'
-import { extractRepoName } from '../_lib/utils'
+import { extractRepoName, normalizeGitUrl } from '../_lib/utils'
 import { apiRequest } from '../_lib/api'
 
 function inferPlatform(gitUrl: string): string {
@@ -39,9 +40,31 @@ export function inferCredentialName(gitUrl: string): string {
   }
 }
 
+function getProjectRepos(project: Project | null | undefined): ProjectRepo[] {
+  if (!project) return []
+  if (project.gitUrls && project.gitUrls.length > 0) {
+    return project.gitUrls
+  }
+  if (!project.gitUrl) return []
+  return [{
+    url: project.gitUrl,
+    branch: project.branch || 'main',
+    name: extractRepoName(project.gitUrl)
+  }]
+}
+
+function getProjectRepoUrlSet(project: Project | null | undefined): Set<string> {
+  return new Set(getProjectRepos(project).map((repo) => normalizeGitUrl(repo.url)))
+}
+
+function getProjectRepoBranchMap(project: Project | null | undefined): Record<string, string> {
+  return Object.fromEntries(getProjectRepos(project).map((repo) => [repo.url, repo.branch]))
+}
+
 type UseProjectEditorParams = {
   session: Session | null
   currentTeamId: string | null
+  projects: Project[]
   getAuthHeaders: () => Record<string, string>
   clearSession: () => void
   showToast: (message: string, type?: ToastType, duration?: number) => void
@@ -56,6 +79,7 @@ type UseProjectEditorParams = {
 export function useProjectEditor({
   session,
   currentTeamId,
+  projects,
   getAuthHeaders,
   clearSession,
   showToast,
@@ -97,6 +121,8 @@ export function useProjectEditor({
   const [editProviderRepos, setEditProviderRepos] = useState<ProviderRepo[]>([])
   const [editRepoSearch, setEditRepoSearch] = useState('')
   const [editSelectedRepos, setEditSelectedRepos] = useState<EditRepoSelection>({})
+  const [editExistingRepoBranches, setEditExistingRepoBranches] = useState<Record<string, string>>({})
+  const [editExistingRepoSavingUrl, setEditExistingRepoSavingUrl] = useState<string | null>(null)
 
   useEffect(() => {
     setProviderSelectId('')
@@ -108,6 +134,8 @@ export function useProjectEditor({
     setEditRepoSearch('')
     setEditProviderRepos([])
     setEditSelectedRepos({})
+    setEditExistingRepoBranches({})
+    setEditExistingRepoSavingUrl(null)
     setAddProjectModalOpen(false)
     setEditProjectModalOpen(false)
   }, [currentTeamId])
@@ -118,6 +146,26 @@ export function useProjectEditor({
       setEditProjectModalOpen(false)
     }
   }, [session])
+
+  useEffect(() => {
+    if (!providerAddToProjectId) return
+
+    const existingRepoUrls = getProjectRepoUrlSet(
+      projects.find((project) => project.id === providerAddToProjectId)
+    )
+
+    setProviderSelectedRepos((prev) => {
+      const nextEntries = Object.entries(prev).filter(
+        ([repoUrl]) => !existingRepoUrls.has(normalizeGitUrl(repoUrl))
+      )
+
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev
+      }
+
+      return Object.fromEntries(nextEntries)
+    })
+  }, [projects, providerAddToProjectId])
 
   useEffect(() => {
     if (isPrivateRepo && credentialMode === 'new' && gitUrl && !newCredentialName) {
@@ -196,6 +244,11 @@ export function useProjectEditor({
       }
 
       if (addToProjectId) {
+        const targetProject = projects.find((project) => project.id === addToProjectId)
+        if (getProjectRepoUrlSet(targetProject).has(normalizeGitUrl(gitUrl.trim()))) {
+          showToast('Repository already exists in this project', 'error')
+          return
+        }
         const repoName = extractRepoName(gitUrl.trim())
         const repo: { gitUrl: string; name: string; branch?: string } = {
           gitUrl: gitUrl.trim(),
@@ -333,9 +386,22 @@ export function useProjectEditor({
   }
 
   async function handleImportSelectedRepos() {
-    const selectedEntries = Object.entries(providerSelectedRepos)
+    const existingRepoUrls = providerAddToProjectId
+      ? getProjectRepoUrlSet(projects.find((project) => project.id === providerAddToProjectId))
+      : new Set<string>()
+
+    const selectedEntries = Object.entries(providerSelectedRepos).filter(
+      ([gitUrlValue]) => !existingRepoUrls.has(normalizeGitUrl(gitUrlValue))
+    )
+    const skippedCount = Object.keys(providerSelectedRepos).length - selectedEntries.length
+
     if (selectedEntries.length === 0) {
-      showToast('Please select at least one repository', 'error')
+      showToast(
+        skippedCount > 0
+          ? 'Selected repositories are already in this project'
+          : 'Please select at least one repository',
+        'error'
+      )
       return
     }
     if (!providerSelectId) {
@@ -362,6 +428,9 @@ export function useProjectEditor({
           body: { repos, gitProviderId: providerSelectId },
           onUnauthorized: clearSession
         })
+        if (skippedCount > 0) {
+          showToast(`Skipped ${skippedCount} repo(s) already in the project`, 'info')
+        }
         showToast(`Added ${repos.length} repo(s) to project`, 'success')
       } else {
         await apiRequest('/api/projects/multi', {
@@ -392,9 +461,12 @@ export function useProjectEditor({
         onUnauthorized: clearSession
       })
       setEditingProject(data)
+      setEditExistingRepoBranches(getProjectRepoBranchMap(data))
+      setEditExistingRepoSavingUrl(null)
       setEditProjectModalOpen(true)
       setEditTab('manual')
       setEditProviderId('')
+      setBranchCache({})
       setEditProviderRepos([])
       setEditRepoSearch('')
       setEditSelectedRepos({})
@@ -418,6 +490,8 @@ export function useProjectEditor({
     setEditProviderRepos([])
     setEditRepoSearch('')
     setEditSelectedRepos({})
+    setEditExistingRepoBranches({})
+    setEditExistingRepoSavingUrl(null)
     void loadProjects()
   }, [loadProjects])
 
@@ -433,6 +507,7 @@ export function useProjectEditor({
         onUnauthorized: clearSession
       })
       setEditingProject(data)
+      setEditExistingRepoBranches(getProjectRepoBranchMap(data))
       showToast('Repository removed', 'success')
     } catch (err) {
       if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
@@ -456,6 +531,10 @@ export function useProjectEditor({
       showToast('Please enter a name for the repo subdirectory', 'error')
       return
     }
+    if (getProjectRepoUrlSet(editingProject).has(normalizeGitUrl(url))) {
+      showToast('Repository already exists in this project', 'error')
+      return
+    }
     try {
       const data = await apiRequest<Project>(`/api/projects/${editingProject.id}/repos`, {
         method: 'POST',
@@ -464,6 +543,7 @@ export function useProjectEditor({
         onUnauthorized: clearSession
       })
       setEditingProject(data)
+      setEditExistingRepoBranches(getProjectRepoBranchMap(data))
       setEditGitUrl('')
       setEditBranch('')
       setEditName('')
@@ -501,6 +581,7 @@ export function useProjectEditor({
   async function handleEditProviderChange(providerId: string) {
     setEditProviderId(providerId)
     setEditSelectedRepos({})
+    setBranchCache({})
     setEditProviderRepos([])
     setEditRepoSearch('')
     if (!providerId) return
@@ -509,6 +590,7 @@ export function useProjectEditor({
 
   function toggleEditRepo(repo: ProviderRepo, checked: boolean) {
     if (checked) {
+      const owner = repo.owner?.login || ''
       setEditSelectedRepos((prev) => ({
         ...prev,
         [repo.clone_url]: {
@@ -517,6 +599,9 @@ export function useProjectEditor({
           defaultBranch: repo.default_branch
         }
       }))
+      if (editProviderId) {
+        void loadBranchesForRepo(editProviderId, owner, repo.name, repo.default_branch)
+      }
     } else {
       setEditSelectedRepos((prev) => {
         const next = { ...prev }
@@ -535,9 +620,19 @@ export function useProjectEditor({
 
   async function handleAddSelectedReposToProject() {
     if (!editingProject) return
-    const selectedEntries = Object.entries(editSelectedRepos)
+    const existingRepoUrls = getProjectRepoUrlSet(editingProject)
+    const selectedEntries = Object.entries(editSelectedRepos).filter(
+      ([gitUrlValue]) => !existingRepoUrls.has(normalizeGitUrl(gitUrlValue))
+    )
+    const skippedCount = Object.keys(editSelectedRepos).length - selectedEntries.length
+
     if (selectedEntries.length === 0) {
-      showToast('Please select at least one repository', 'error')
+      showToast(
+        skippedCount > 0
+          ? 'Selected repositories are already in this project'
+          : 'Please select at least one repository',
+        'error'
+      )
       return
     }
     if (!editProviderId) {
@@ -559,7 +654,11 @@ export function useProjectEditor({
         onUnauthorized: clearSession
       })
       setEditingProject(data)
+      setEditExistingRepoBranches(getProjectRepoBranchMap(data))
       setEditSelectedRepos({})
+      if (skippedCount > 0) {
+        showToast(`Skipped ${skippedCount} repo(s) already in the project`, 'info')
+      }
       showToast(`Added ${repos.length} repo(s)`, 'success')
     } catch (err) {
       if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
@@ -567,6 +666,58 @@ export function useProjectEditor({
       }
       const message = err instanceof Error ? err.message : 'Failed to add repos'
       showToast(message, 'error')
+    }
+  }
+
+  function updateExistingRepoBranchInput(repoUrl: string, branch: string) {
+    setEditExistingRepoBranches((prev) => ({
+      ...prev,
+      [repoUrl]: branch
+    }))
+  }
+
+  async function handleUpdateExistingRepoBranch(repoUrl: string) {
+    if (!editingProject) return
+
+    const nextBranch = editExistingRepoBranches[repoUrl]?.trim()
+    if (!nextBranch) {
+      showToast('Please enter a branch name', 'error')
+      return
+    }
+
+    const currentRepo = getProjectRepos(editingProject).find(
+      (repo) => normalizeGitUrl(repo.url) === normalizeGitUrl(repoUrl)
+    )
+
+    if (!currentRepo) {
+      showToast('Repository not found in this project', 'error')
+      return
+    }
+
+    if (currentRepo.branch === nextBranch) {
+      showToast('Branch is unchanged', 'info')
+      return
+    }
+
+    setEditExistingRepoSavingUrl(repoUrl)
+    try {
+      const data = await apiRequest<Project>(`/api/projects/${editingProject.id}/repos`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: { repoUrl, branch: nextBranch },
+        onUnauthorized: clearSession
+      })
+      setEditingProject(data)
+      setEditExistingRepoBranches(getProjectRepoBranchMap(data))
+      showToast('Branch updated. Sync queued.', 'success')
+    } catch (err) {
+      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
+        return
+      }
+      const message = err instanceof Error ? err.message : 'Failed to update repo branch'
+      showToast(message, 'error')
+    } finally {
+      setEditExistingRepoSavingUrl(null)
     }
   }
 
@@ -581,26 +732,20 @@ export function useProjectEditor({
       .slice(0, 50)
   }, [providerRepos, providerRepoSearch])
 
-  const editingProjectRepos = useMemo(() => editingProject?.gitUrls ?? [], [editingProject])
+  const editingProjectRepos = useMemo(() => getProjectRepos(editingProject), [editingProject])
 
   const filteredEditRepos = useMemo(() => {
-    const editExistingUrls = new Set<string>()
-    if (editingProject) {
-      editingProjectRepos.forEach((repo) => editExistingUrls.add(repo.url))
-      if (!editingProjectRepos.length && editingProject.gitUrl) {
-        editExistingUrls.add(editingProject.gitUrl)
-      }
-    }
+    const editExistingUrls = getProjectRepoUrlSet(editingProject)
     const search = editRepoSearch.toLowerCase()
     return editProviderRepos
       .filter((repo) => {
-        if (editExistingUrls.has(repo.clone_url)) return false
+        if (editExistingUrls.has(normalizeGitUrl(repo.clone_url))) return false
         return (
           repo.full_name.toLowerCase().includes(search) || repo.name.toLowerCase().includes(search)
         )
       })
       .slice(0, 30)
-  }, [editProviderRepos, editRepoSearch, editingProject, editingProjectRepos])
+  }, [editProviderRepos, editRepoSearch, editingProject])
 
   return {
     addProjectModalOpen,
@@ -632,6 +777,8 @@ export function useProjectEditor({
     editProviderRepos,
     editRepoSearch,
     editSelectedRepos,
+    editExistingRepoBranches,
+    editExistingRepoSavingUrl,
     filteredProviderRepos,
     editingProjectRepos,
     filteredEditRepos,
@@ -649,6 +796,8 @@ export function useProjectEditor({
     handleEditProviderChange,
     toggleEditRepo,
     updateEditRepoBranch,
+    updateExistingRepoBranchInput,
+    handleUpdateExistingRepoBranch,
     handleAddSelectedReposToProject,
     setAddTab,
     setAddToProjectId,

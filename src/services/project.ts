@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { simpleGit, SimpleGit } from 'simple-git'
+import { simpleGit } from 'simple-git'
 import { supabase } from '../lib/supabase'
 import { getGitProvider, getAuthenticatedCloneUrl, haveGithubAppRequirements } from './git-provider'
 import type { Project, CreateProjectRequest, CreateMultiRepoProjectRequest, RepoInfo, SyncStatus } from '../types'
@@ -41,6 +41,23 @@ function redactUrlCredentials(value: string): string {
 
 function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
+}
+
+function normalizeRepoUrl(url: string): string {
+  const trimmed = url.trim()
+  try {
+    const parsed = new URL(trimmed)
+    const normalizedPath = parsed.pathname
+      .replace(/\/+$/, '')
+      .replace(/\.git$/i, '')
+      .toLowerCase()
+    return `${parsed.hostname.toLowerCase()}${normalizedPath}`
+  } catch {
+    return trimmed
+      .replace(/\/+$/, '')
+      .replace(/\.git$/i, '')
+      .toLowerCase()
+  }
 }
 
 export function formatProjectSyncError(error: unknown): string {
@@ -207,14 +224,15 @@ async function updateStoredProjectBranch(
   gitUrl: string,
   branch: string
 ): Promise<void> {
+  const normalizedGitUrl = normalizeRepoUrl(gitUrl)
   if (project.gitUrls && project.gitUrls.length > 0) {
     const nextGitUrls = project.gitUrls.map((repo) =>
-      repo.url === gitUrl ? { ...repo, branch } : repo
+      normalizeRepoUrl(repo.url) === normalizedGitUrl ? { ...repo, branch } : repo
     )
     const update: { git_urls: typeof nextGitUrls; branch?: string } = {
       git_urls: nextGitUrls
     }
-    if (project.gitUrl === gitUrl) {
+    if (normalizeRepoUrl(project.gitUrl) === normalizedGitUrl) {
       update.branch = branch
       project.branch = branch
     }
@@ -236,6 +254,33 @@ async function updateStoredProjectBranch(
   }
 
   project.branch = branch
+}
+
+async function syncRepoAtPath(
+  project: Project,
+  gitUrl: string,
+  branch: string,
+  repoPath: string,
+  repoLabel: string
+): Promise<void> {
+  try {
+    await fs.access(repoPath)
+    const git = simpleGit(repoPath)
+    const branchSummary = await git.branchLocal()
+    if (branchSummary.current !== branch) {
+      throw new Error(`Repository branch mismatch: expected ${branch} but found ${branchSummary.current || 'unknown'}`)
+    }
+    await git.pull('origin', branch)
+    console.log(`Pulled ${repoLabel} successfully`)
+  } catch {
+    try {
+      await fs.rm(repoPath, { recursive: true, force: true })
+    } catch {
+      // Ignore if directory doesn't exist
+    }
+    console.log(`Repo ${repoLabel} missing, corrupted, or on the wrong branch, cloning...`)
+    await cloneProjectRepo(project, gitUrl, branch, repoPath)
+  }
 }
 
 async function cloneProjectRepo(
@@ -309,38 +354,18 @@ async function syncProjectWorkspace(
     await fs.mkdir(project.workspacePath, { recursive: true })
     for (const repo of project.gitUrls) {
       const repoPath = path.join(project.workspacePath, repo.name)
-      try {
-        await fs.access(repoPath)
-        const git = simpleGit(repoPath)
-        await git.pull()
-        console.log(`Pulled ${repo.name} successfully`)
-      } catch {
-        // Remove existing directory if it exists (may be corrupted/partial clone)
-        try {
-          await fs.rm(repoPath, { recursive: true, force: true })
-        } catch {
-          // Ignore if directory doesn't exist
-        }
-        console.log(`Repo ${repo.name} missing or corrupted, cloning...`)
-        await cloneProjectRepo(project, repo.url, repo.branch, repoPath)
-      }
+      await syncRepoAtPath(project, repo.url, repo.branch, repoPath, repo.name)
     }
     return
   }
 
-  try {
-    await fs.access(project.workspacePath)
-    const git = createGitClient(project)
-    await git.pull()
-  } catch {
-    // Remove existing directory if it exists (may be corrupted/partial clone)
-    try {
-      await fs.rm(project.workspacePath, { recursive: true, force: true })
-    } catch {
-      // Ignore if directory doesn't exist
-    }
-    await cloneProjectWorkspace(project)
-  }
+  await syncRepoAtPath(
+    project,
+    project.gitUrl,
+    project.branch,
+    project.workspacePath,
+    project.name
+  )
 }
 
 async function detectDefaultBranch(
@@ -521,10 +546,6 @@ export async function deleteProject(id: string, teamId: string): Promise<void> {
   await fs.rm(project.workspacePath, { recursive: true, force: true })
 }
 
-function createGitClient(project: Project): SimpleGit {
-  return simpleGit(project.workspacePath)
-}
-
 // Create a project with multiple repos
 export async function createMultiRepoProject(
   userId: string,
@@ -609,10 +630,13 @@ export async function addReposToProject(
 
   // Database stores { url, branch, name } format
   const existingGitUrls: { url: string; branch: string; name: string }[] = projectData.git_urls || []
+  const existingNormalizedUrls = new Set(existingGitUrls.map((repo) => normalizeRepoUrl(repo.url)))
+  if (projectData.git_url) {
+    existingNormalizedUrls.add(normalizeRepoUrl(projectData.git_url))
+  }
 
   // Check for duplicates
-  const existingUrls = new Set(existingGitUrls.map(r => r.url))
-  const duplicates = repos.filter(r => existingUrls.has(r.gitUrl))
+  const duplicates = repos.filter((repo) => existingNormalizedUrls.has(normalizeRepoUrl(repo.gitUrl)))
   if (duplicates.length > 0) {
     throw new Error(`Repository already exists in project: ${duplicates[0].gitUrl}`)
   }
@@ -699,7 +723,8 @@ export async function removeRepoFromProject(
   // Database stores { url, branch, name } format
   type DbRepoInfo = { url: string; branch: string; name: string }
   const existingGitUrls: DbRepoInfo[] = projectData.git_urls || []
-  const repoToRemove = existingGitUrls.find(r => r.url === repoUrl)
+  const normalizedRepoUrl = normalizeRepoUrl(repoUrl)
+  const repoToRemove = existingGitUrls.find((repo) => normalizeRepoUrl(repo.url) === normalizedRepoUrl)
 
   if (!repoToRemove) {
     throw new Error(`Repository not found in project: ${repoUrl}`)
@@ -710,11 +735,11 @@ export async function removeRepoFromProject(
   await fs.rm(repoPath, { recursive: true, force: true })
 
   // Update git_urls in database
-  const newGitUrls = existingGitUrls.filter(r => r.url !== repoUrl)
+  const newGitUrls = existingGitUrls.filter((repo) => normalizeRepoUrl(repo.url) !== normalizedRepoUrl)
 
   // Update primary git_url if we removed it
   const updateData: { git_urls: DbRepoInfo[]; git_url?: string | null; branch?: string | null } = { git_urls: newGitUrls }
-  if (projectData.git_url === repoUrl) {
+  if (projectData.git_url && normalizeRepoUrl(projectData.git_url) === normalizedRepoUrl) {
     if (newGitUrls.length > 0) {
       updateData.git_url = newGitUrls[0].url
       updateData.branch = newGitUrls[0].branch
@@ -740,6 +765,90 @@ export async function removeRepoFromProject(
     throw new Error('Failed to get updated project')
   }
   return project
+}
+
+export async function updateProjectRepoBranch(
+  projectId: string,
+  teamId: string,
+  repoUrl: string,
+  branch: string
+): Promise<Project> {
+  const project = await getProject(projectId, teamId)
+  if (!project) {
+    throw new Error(`Project not found: ${projectId}`)
+  }
+
+  const nextBranch = branch.trim()
+  if (!nextBranch) {
+    throw new Error('Branch is required')
+  }
+
+  const normalizedRepoUrl = normalizeRepoUrl(repoUrl)
+
+  if (project.gitUrls && project.gitUrls.length > 0) {
+    let found = false
+    const nextGitUrls = project.gitUrls.map((repo) => {
+      if (normalizeRepoUrl(repo.url) !== normalizedRepoUrl) return repo
+      found = true
+      return { ...repo, branch: nextBranch }
+    })
+
+    if (!found) {
+      throw new Error(`Repository not found in project: ${repoUrl}`)
+    }
+
+    const update: {
+      git_urls: typeof nextGitUrls
+      sync_status: SyncStatus
+      sync_error: null
+      branch?: string
+    } = {
+      git_urls: nextGitUrls,
+      sync_status: 'pending',
+      sync_error: null
+    }
+
+    if (normalizeRepoUrl(project.gitUrl) === normalizedRepoUrl) {
+      update.branch = nextBranch
+    }
+
+    const { error } = await supabase
+      .from('projects')
+      .update(update)
+      .eq('id', projectId)
+      .eq('team_id', teamId)
+
+    if (error) {
+      throw new Error(`Failed to update project repo branch: ${error.message}`)
+    }
+  } else {
+    if (normalizeRepoUrl(project.gitUrl) !== normalizedRepoUrl) {
+      throw new Error(`Repository not found in project: ${repoUrl}`)
+    }
+
+    const { error } = await supabase
+      .from('projects')
+      .update({
+        branch: nextBranch,
+        sync_status: 'pending',
+        sync_error: null
+      })
+      .eq('id', projectId)
+      .eq('team_id', teamId)
+
+    if (error) {
+      throw new Error(`Failed to update project repo branch: ${error.message}`)
+    }
+  }
+
+  await enqueueProjectJob(projectId, teamId, 'sync')
+
+  const updatedProject = await getProject(projectId, teamId)
+  if (!updatedProject) {
+    throw new Error('Failed to get updated project')
+  }
+
+  return updatedProject
 }
 
 async function cloneRepositoryToPath(

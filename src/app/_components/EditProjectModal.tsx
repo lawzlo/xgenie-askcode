@@ -7,6 +7,7 @@ type EditProjectModalProps = {
   open: boolean
   editingProject: Project | null
   editingProjectRepos: ProjectRepo[]
+  branchCache: Record<string, string[]>
   editTab: 'manual' | 'provider'
   onSelectManualTab: () => void
   onSelectProviderTab: () => void
@@ -24,8 +25,12 @@ type EditProjectModalProps = {
   onEditRepoSearchChange: (value: string) => void
   filteredEditRepos: ProviderRepo[]
   editSelectedRepos: EditRepoSelection
+  editExistingRepoBranches: Record<string, string>
+  editExistingRepoSavingUrl: string | null
   onToggleEditRepo: (repo: ProviderRepo, checked: boolean) => void
   onUpdateEditRepoBranch: (repoUrl: string, branch: string) => void
+  onEditExistingRepoBranchChange: (repoUrl: string, branch: string) => void
+  onUpdateExistingRepoBranch: (repoUrl: string) => void
   onAddSelectedRepos: () => void
   onRemoveRepo: (repoUrl: string) => void
   onClose: () => void
@@ -35,6 +40,7 @@ export function EditProjectModal({
   open,
   editingProject,
   editingProjectRepos,
+  branchCache,
   editTab,
   onSelectManualTab,
   onSelectProviderTab,
@@ -52,8 +58,12 @@ export function EditProjectModal({
   onEditRepoSearchChange,
   filteredEditRepos,
   editSelectedRepos,
+  editExistingRepoBranches,
+  editExistingRepoSavingUrl,
   onToggleEditRepo,
   onUpdateEditRepoBranch,
+  onEditExistingRepoBranchChange,
+  onUpdateExistingRepoBranch,
   onAddSelectedRepos,
   onRemoveRepo,
   onClose
@@ -71,8 +81,12 @@ export function EditProjectModal({
         <div className="modal-title">Edit Project: {editingProject.name}</div>
 
         <div style={{ marginBottom: 15 }}>
-          {editingProjectRepos.length > 0 ? (
-            editingProjectRepos.map((repo) => (
+          {editingProjectRepos.map((repo) => {
+            const branchValue = editExistingRepoBranches[repo.url] ?? repo.branch
+            const isSavingBranch = editExistingRepoSavingUrl === repo.url
+            const isBranchUnchanged = branchValue.trim() === repo.branch
+
+            return (
               <div
                 key={repo.url}
                 style={{
@@ -82,44 +96,58 @@ export function EditProjectModal({
                   marginBottom: 5,
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'center'
+                  alignItems: 'center',
+                  gap: 12
                 }}
               >
-                <span style={{ fontFamily: 'monospace', fontSize: '9pt' }}>
-                  {repo.name}: {truncateUrl(repo.url)} ({repo.branch})
-                </span>
-                {editingProjectRepos.length > 1 ? (
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: '9pt' }}>
+                    {repo.name}: {truncateUrl(repo.url)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ width: 110 }}
+                    value={branchValue}
+                    onChange={(event) =>
+                      onEditExistingRepoBranchChange(repo.url, event.target.value)
+                    }
+                  />
                   <button
                     type="button"
                     className="link-button"
-                    onClick={() => onRemoveRepo(repo.url)}
-                    style={{ color: '#c00', fontSize: '8pt' }}
+                    disabled={isSavingBranch || branchValue.trim() === '' || isBranchUnchanged}
+                    style={
+                      isSavingBranch || branchValue.trim() === '' || isBranchUnchanged
+                        ? { opacity: 0.5, cursor: 'not-allowed', fontSize: '8pt' }
+                        : { fontSize: '8pt' }
+                    }
+                    onClick={() => {
+                      if (!isSavingBranch && branchValue.trim() && !isBranchUnchanged) {
+                        onUpdateExistingRepoBranch(repo.url)
+                      }
+                    }}
                   >
-                    remove
+                    {isSavingBranch ? 'saving...' : 'save branch'}
                   </button>
-                ) : (
-                  <span style={{ color: '#828282', fontSize: '8pt' }}>primary repo</span>
-                )}
+                  {editingProjectRepos.length > 1 ? (
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => onRemoveRepo(repo.url)}
+                      style={{ color: '#c00', fontSize: '8pt' }}
+                    >
+                      remove
+                    </button>
+                  ) : (
+                    <span style={{ color: '#828282', fontSize: '8pt' }}>primary repo</span>
+                  )}
+                </div>
               </div>
-            ))
-          ) : (
-            <div
-              style={{
-                padding: 8,
-                background: '#fff',
-                border: '1px solid #e0e0d8',
-                marginBottom: 5,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}
-            >
-              <span style={{ fontFamily: 'monospace', fontSize: '9pt' }}>
-                {truncateUrl(editingProject.gitUrl)} ({editingProject.branch || 'main'})
-              </span>
-              <span style={{ color: '#828282', fontSize: '8pt' }}>primary repo</span>
-            </div>
-          )}
+            )
+          })}
         </div>
 
         <div style={{ borderTop: '1px solid #e0e0d8', paddingTop: 15, marginTop: 15 }}>
@@ -212,6 +240,9 @@ export function EditProjectModal({
                   ) : (
                     filteredEditRepos.map((repo) => {
                       const isChecked = !!editSelectedRepos[repo.clone_url]
+                      const owner = repo.owner?.login || ''
+                      const cacheKey = `${owner}/${repo.name}`
+                      const branches = branchCache[cacheKey] || [repo.default_branch]
                       const selectedBranch =
                         editSelectedRepos[repo.clone_url]?.branch || repo.default_branch
                       return (
@@ -234,7 +265,11 @@ export function EditProjectModal({
                                 onUpdateEditRepoBranch(repo.clone_url, event.target.value)
                               }
                             >
-                              <option value={repo.default_branch}>{repo.default_branch}</option>
+                              {branches.map((branch) => (
+                                <option key={branch} value={branch}>
+                                  {branch}
+                                </option>
+                              ))}
                             </select>
                           ) : null}
                         </div>
