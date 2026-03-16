@@ -17,6 +17,23 @@ export function extractRepoName(url: string): string {
   return parts[parts.length - 1] || cleaned
 }
 
+export function normalizeGitUrl(url: string): string {
+  const trimmed = url.trim()
+  try {
+    const parsed = new URL(trimmed)
+    const normalizedPath = parsed.pathname
+      .replace(/\/+$/, '')
+      .replace(/\.git$/i, '')
+      .toLowerCase()
+    return `${parsed.hostname.toLowerCase()}${normalizedPath}`
+  } catch {
+    return trimmed
+      .replace(/\/+$/, '')
+      .replace(/\.git$/i, '')
+      .toLowerCase()
+  }
+}
+
 export function timeAgo(dateStr: string | undefined | null): string {
   if (!dateStr) return 'not synced'
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)

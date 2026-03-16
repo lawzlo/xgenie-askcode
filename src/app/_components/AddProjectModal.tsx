@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import type { GitProvider, Project, ProviderRepo, ProviderSelection, SavedCredential } from '../_types'
 import { inferCredentialName } from '../_hooks/useProjectEditor'
+import { normalizeGitUrl } from '../_lib/utils'
 
 type AddProjectModalProps = {
   open: boolean
@@ -31,7 +32,6 @@ type AddProjectModalProps = {
   newCredentialName: string
   onNewCredentialNameChange: (value: string) => void
   savedCredentials: SavedCredential[]
-  onDeleteSavedCredential: (id: string) => Promise<void>
   addProjectLoading: boolean
   onSubmitAddProject: (event: FormEvent<HTMLFormElement>) => void
   connectedProviders: GitProvider[]
@@ -78,7 +78,6 @@ export function AddProjectModal({
   newCredentialName,
   onNewCredentialNameChange,
   savedCredentials,
-  onDeleteSavedCredential,
   addProjectLoading,
   onSubmitAddProject,
   connectedProviders,
@@ -99,6 +98,25 @@ export function AddProjectModal({
 }: AddProjectModalProps) {
   const [showToken, setShowToken] = useState(false)
   if (!open) return null
+
+  const providerTargetProject = providerAddToProjectId
+    ? projects.find((project) => project.id === providerAddToProjectId) || null
+    : null
+  const existingProviderRepoUrls = new Set<string>()
+  if (providerTargetProject) {
+    providerTargetProject.gitUrls?.forEach((repo) => existingProviderRepoUrls.add(normalizeGitUrl(repo.url)))
+    if (
+      (!providerTargetProject.gitUrls || providerTargetProject.gitUrls.length === 0) &&
+      providerTargetProject.gitUrl
+    ) {
+      existingProviderRepoUrls.add(normalizeGitUrl(providerTargetProject.gitUrl))
+    }
+  }
+  const visibleProviderRepos = filteredProviderRepos.filter(
+    (repo) => !existingProviderRepoUrls.has(normalizeGitUrl(repo.clone_url))
+  )
+  const hiddenProviderRepoCount = filteredProviderRepos.length - visibleProviderRepos.length
+
   return (
     <div
       className="modal-overlay"
@@ -348,6 +366,11 @@ export function AddProjectModal({
               <p style={{ color: '#828282', fontSize: '8pt', margin: '5px 0 10px 0' }}>
                 Select repos to include in this project. AI will search across all selected repos.
               </p>
+              {providerAddToProjectId && hiddenProviderRepoCount > 0 ? (
+                <p style={{ color: '#828282', fontSize: '8pt', margin: '0 0 10px 0' }}>
+                  {hiddenProviderRepoCount} repo(s) already in this project are hidden.
+                </p>
+              ) : null}
               <div className="repo-list">
                 {providerReposLoading ? (
                   <div style={{ padding: 10, color: '#828282' }}>Loading repositories...</div>
@@ -355,8 +378,15 @@ export function AddProjectModal({
                 {!providerReposLoading && providerRepos.length === 0 ? (
                   <div style={{ padding: 10, color: '#828282' }}>No repositories found.</div>
                 ) : null}
+                {!providerReposLoading && providerRepos.length > 0 && visibleProviderRepos.length === 0 ? (
+                  <div style={{ padding: 10, color: '#828282' }}>
+                    {providerAddToProjectId
+                      ? 'All matching repositories are already in this project.'
+                      : 'No repositories found.'}
+                  </div>
+                ) : null}
                 {!providerReposLoading
-                  ? filteredProviderRepos.map((repo) => {
+                  ? visibleProviderRepos.map((repo) => {
                       const isChecked = !!providerSelectedRepos[repo.clone_url]
                       const owner = repo.owner?.login || ''
                       const cacheKey = `${owner}/${repo.name}`
