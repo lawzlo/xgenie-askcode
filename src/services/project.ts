@@ -60,13 +60,26 @@ function normalizeRepoUrl(url: string): string {
   }
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: unknown }).message || '')
+  }
+  return typeof error === 'string' ? error : 'Unknown error'
+}
+
+function isMissingSyncErrorColumnError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase()
+  return (
+    message.includes('sync_error') &&
+    (message.includes('schema cache') || message.includes('does not exist'))
+  )
+}
+
 export function formatProjectSyncError(error: unknown): string {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-      ? error
-      : 'Unknown error'
+  const raw = getErrorMessage(error)
   const sanitized = redactUrlCredentials(raw)
   const lines = sanitized
     .split('\n')
@@ -79,6 +92,38 @@ export function formatProjectSyncError(error: unknown): string {
 
   const message = collapseWhitespace((importantLines.length > 0 ? importantLines : lines).join(' '))
   return message.slice(0, 500) || 'Unknown error'
+}
+
+function formatRepoSyncError(repoLabel: string, branch: string, error: unknown): string {
+  return `${repoLabel} (${branch}): ${formatProjectSyncError(error)}`
+}
+
+async function updateProjectRow(
+  projectId: string,
+  values: Record<string, unknown>,
+  options: { teamId?: string; errorPrefix: string }
+): Promise<void> {
+  let query = supabase.from('projects').update(values).eq('id', projectId)
+  if (options.teamId) {
+    query = query.eq('team_id', options.teamId)
+  }
+
+  let { error } = await query
+
+  if (error && 'sync_error' in values && isMissingSyncErrorColumnError(error)) {
+    const fallbackValues = { ...values }
+    delete fallbackValues.sync_error
+    let fallbackQuery = supabase.from('projects').update(fallbackValues).eq('id', projectId)
+    if (options.teamId) {
+      fallbackQuery = fallbackQuery.eq('team_id', options.teamId)
+    }
+    const fallbackResult = await fallbackQuery
+    error = fallbackResult.error
+  }
+
+  if (error) {
+    throw new Error(`${options.errorPrefix}: ${error.message}`)
+  }
 }
 
 async function getLatestProjectJobErrors(projectIds: string[]): Promise<Map<string, string>> {
@@ -279,10 +324,7 @@ export async function updateProjectSyncState(
   } else {
     update.sync_error = null
   }
-  const { error } = await supabase.from('projects').update(update).eq('id', projectId)
-  if (error) {
-    throw new Error(`Failed to update sync status: ${error.message}`)
-  }
+  await updateProjectRow(projectId, update, { errorPrefix: 'Failed to update sync status' })
 }
 
 async function updateStoredProjectBranch(
@@ -345,7 +387,7 @@ async function syncRepoAtPath(
       // Ignore if directory doesn't exist
     }
     console.log(`Repo ${repoLabel} missing, corrupted, or on the wrong branch, cloning...`)
-    await cloneProjectRepo(project, gitUrl, branch, repoPath)
+    await cloneProjectRepo(project, gitUrl, branch, repoPath, repoLabel)
   }
 }
 
@@ -353,7 +395,8 @@ async function cloneProjectRepo(
   project: Project,
   gitUrl: string,
   branch: string,
-  targetPath: string
+  targetPath: string,
+  repoLabel: string
 ): Promise<void> {
   try {
     await cloneRepositoryToPath(
@@ -362,7 +405,8 @@ async function cloneProjectRepo(
       targetPath,
       project.gitProviderId,
       project.teamId,
-      project.credentials
+      project.credentials,
+      repoLabel
     )
   } catch (error) {
     if (!isMissingRemoteBranchError(error)) {
@@ -380,7 +424,7 @@ async function cloneProjectRepo(
       throw error
     }
 
-    console.warn(`Branch ${branch} missing for ${gitUrl}, retrying with ${detectedBranch}`)
+    console.warn(`Branch ${branch} missing for ${repoLabel}, retrying with ${detectedBranch}`)
     await fs.rm(targetPath, { recursive: true, force: true })
     await cloneRepositoryToPath(
       gitUrl,
@@ -388,7 +432,8 @@ async function cloneProjectRepo(
       targetPath,
       project.gitProviderId,
       project.teamId,
-      project.credentials
+      project.credentials,
+      repoLabel
     )
     await updateStoredProjectBranch(project, gitUrl, detectedBranch)
   }
@@ -400,12 +445,12 @@ async function cloneProjectWorkspace(project: Project): Promise<void> {
   if (project.gitUrls && project.gitUrls.length > 0) {
     for (const repo of project.gitUrls) {
       const repoPath = path.join(project.workspacePath, repo.name)
-      await cloneProjectRepo(project, repo.url, repo.branch, repoPath)
+      await cloneProjectRepo(project, repo.url, repo.branch, repoPath, repo.name)
     }
     return
   }
 
-  await cloneProjectRepo(project, project.gitUrl, project.branch, project.workspacePath)
+  await cloneProjectRepo(project, project.gitUrl, project.branch, project.workspacePath, project.name)
 }
 
 async function syncProjectWorkspace(
@@ -710,7 +755,8 @@ export async function addReposToProject(
       repoPath,
       gitProviderId || projectData.git_provider_id,
       teamId,
-      credentials
+      credentials,
+      repo.name
     )
   }
 
@@ -720,19 +766,15 @@ export async function addReposToProject(
     ...reposWithBranch.map(r => ({ url: r.gitUrl, branch: r.branch, name: r.name }))
   ]
 
-  const { error: updateError } = await supabase
-    .from('projects')
-    .update({
+  await updateProjectRow(
+    projectId,
+    {
       git_urls: newGitUrls,
       sync_status: 'pending',
       sync_error: null
-    })
-    .eq('id', projectId)
-    .eq('team_id', teamId)
-
-  if (updateError) {
-    throw new Error(`Failed to update project: ${updateError.message}`)
-  }
+    },
+    { teamId, errorPrefix: 'Failed to update project' }
+  )
 
   // Return updated project
   const project = await getProject(projectId, teamId)
@@ -861,33 +903,24 @@ export async function updateProjectRepoBranch(
       update.branch = nextBranch
     }
 
-    const { error } = await supabase
-      .from('projects')
-      .update(update)
-      .eq('id', projectId)
-      .eq('team_id', teamId)
-
-    if (error) {
-      throw new Error(`Failed to update project repo branch: ${error.message}`)
-    }
+    await updateProjectRow(projectId, update, {
+      teamId,
+      errorPrefix: 'Failed to update project repo branch'
+    })
   } else {
     if (normalizeRepoUrl(project.gitUrl) !== normalizedRepoUrl) {
       throw new Error(`Repository not found in project: ${repoUrl}`)
     }
 
-    const { error } = await supabase
-      .from('projects')
-      .update({
+    await updateProjectRow(
+      projectId,
+      {
         branch: nextBranch,
         sync_status: 'pending',
         sync_error: null
-      })
-      .eq('id', projectId)
-      .eq('team_id', teamId)
-
-    if (error) {
-      throw new Error(`Failed to update project repo branch: ${error.message}`)
-    }
+      },
+      { teamId, errorPrefix: 'Failed to update project repo branch' }
+    )
   }
 
   await enqueueProjectJob(projectId, teamId, 'sync')
@@ -906,19 +939,20 @@ async function cloneRepositoryToPath(
   targetPath: string,
   gitProviderId: string | undefined,
   teamId: string,
-  credentials?: { token: string }
+  credentials?: { token: string },
+  repoLabel = gitUrl
 ): Promise<void> {
   const { cloneUrl, hasAuth } = await resolveCloneUrl(gitUrl, gitProviderId, teamId, credentials)
 
-  console.log(`Cloning ${gitUrl} (branch: ${branch}, auth: ${hasAuth ? 'yes' : 'no'})`)
+  console.log(`Cloning ${repoLabel} from ${gitUrl} (branch: ${branch}, auth: ${hasAuth ? 'yes' : 'no'})`)
 
   try {
     const git = simpleGit()
     await git.clone(cloneUrl, targetPath, ['--branch', branch, '--single-branch'])
-    console.log(`Cloned ${gitUrl} successfully`)
+    console.log(`Cloned ${repoLabel} successfully`)
   } catch (err) {
-    const message = formatProjectSyncError(err)
-    console.error(`Failed to clone ${gitUrl}: ${message}`)
+    const message = formatRepoSyncError(repoLabel, branch, err)
+    console.error(`Failed to clone ${repoLabel}: ${message}`)
     throw new Error(message)
   }
 }
@@ -964,7 +998,8 @@ export async function processProjectJob(job: ProjectJob): Promise<void> {
           repoPath,
           providerId || project.gitProviderId,
           project.teamId,
-          jobCredentials
+          jobCredentials,
+          repo.name
         )
       }
       break
