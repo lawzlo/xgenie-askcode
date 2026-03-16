@@ -81,6 +81,72 @@ export function formatProjectSyncError(error: unknown): string {
   return message.slice(0, 500) || 'Unknown error'
 }
 
+async function getLatestProjectJobErrors(projectIds: string[]): Promise<Map<string, string>> {
+  if (projectIds.length === 0) {
+    return new Map()
+  }
+
+  const { data, error } = await supabase
+    .from('project_jobs')
+    .select('project_id, error, updated_at')
+    .in('project_id', projectIds)
+    .not('error', 'is', null)
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    console.warn('Failed to load project job errors:', error.message)
+    return new Map()
+  }
+
+  const errors = new Map<string, string>()
+  for (const row of data || []) {
+    const projectId = row.project_id as string | null
+    const jobError = row.error as string | null
+    if (!projectId || !jobError || errors.has(projectId)) {
+      continue
+    }
+    errors.set(projectId, formatProjectSyncError(jobError))
+  }
+
+  return errors
+}
+
+type ProjectRow = {
+  id: string
+  user_id: string
+  team_id: string
+  name: string
+  git_url: string
+  branch: string
+  workspace_path: string
+  last_synced_at: string | null
+  created_at: string
+  git_provider_id: string | null
+  git_urls: { url: string; branch: string; name: string }[] | null
+  credentials: { token: string } | null
+  sync_status: SyncStatus | null
+  sync_error: string | null
+}
+
+function mapProjectRow(row: ProjectRow, fallbackSyncError?: string | null): Project {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    teamId: row.team_id,
+    name: row.name,
+    gitUrl: row.git_url,
+    branch: row.branch,
+    workspacePath: row.workspace_path,
+    lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null,
+    createdAt: new Date(row.created_at),
+    gitProviderId: row.git_provider_id || undefined,
+    gitUrls: row.git_urls || undefined,
+    credentials: row.credentials || undefined,
+    syncStatus: row.sync_status || 'ready',
+    syncError: row.sync_error || fallbackSyncError || null
+  }
+}
+
 async function resolveCloneUrl(
   gitUrl: string,
   gitProviderId: string | undefined,
@@ -447,22 +513,13 @@ export async function getProject(id: string, teamId?: string): Promise<Project |
     return undefined
   }
 
-  return {
-    id: data.id,
-    userId: data.user_id,
-    teamId: data.team_id,
-    name: data.name,
-    gitUrl: data.git_url,
-    branch: data.branch,
-    workspacePath: data.workspace_path,
-    lastSyncedAt: data.last_synced_at ? new Date(data.last_synced_at) : null,
-    createdAt: new Date(data.created_at),
-    gitProviderId: data.git_provider_id,
-    gitUrls: data.git_urls || null,
-    credentials: data.credentials || undefined,
-    syncStatus: (data.sync_status as SyncStatus) || 'ready',
-    syncError: data.sync_error || null
+  let fallbackSyncError: string | null = null
+  if (data.sync_status === 'error' && !data.sync_error) {
+    const jobErrors = await getLatestProjectJobErrors([data.id])
+    fallbackSyncError = jobErrors.get(data.id) || null
   }
+
+  return mapProjectRow(data as ProjectRow, fallbackSyncError)
 }
 
 export async function listProjects(teamId: string): Promise<Project[]> {
@@ -476,22 +533,14 @@ export async function listProjects(teamId: string): Promise<Project[]> {
     throw new Error(`Failed to list projects: ${error.message}`)
   }
 
-  const projects = (data || []).map((row) => ({
-    id: row.id,
-    userId: row.user_id,
-    teamId: row.team_id,
-    name: row.name,
-    gitUrl: row.git_url,
-    branch: row.branch,
-    workspacePath: row.workspace_path,
-    lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null,
-    createdAt: new Date(row.created_at),
-    gitUrls: row.git_urls || null,
-    gitProviderId: row.git_provider_id || undefined,
-    credentials: row.credentials || undefined,
-    syncStatus: (row.sync_status as SyncStatus) || 'ready',
-    syncError: row.sync_error || null
-  }))
+  const rows = (data || []) as ProjectRow[]
+  const fallbackErrors = await getLatestProjectJobErrors(
+    rows
+      .filter((row) => row.sync_status === 'error' && !row.sync_error)
+      .map((row) => row.id)
+  )
+
+  const projects = rows.map((row) => mapProjectRow(row, fallbackErrors.get(row.id) || null))
 
   // Note: Don't check filesystem here - app and worker may be in different containers
   // Trust the database sync_status instead

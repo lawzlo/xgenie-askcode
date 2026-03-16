@@ -112,6 +112,7 @@ export function useProjectList({
         if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 401) {
           return
         }
+        await loadProjects(true)
         const message = err instanceof Error ? err.message : 'Failed to sync project'
         showToast(message, 'error')
       }
