@@ -1,3 +1,4 @@
+import type { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
 export interface Team {
@@ -23,6 +24,8 @@ export interface TeamInvite {
   invited_by: string | null
   created_at: string
 }
+
+const AUTH_USER_PAGE_SIZE = 1000
 
 // Create a new team (called on signup)
 export async function createTeam(ownerId: string, name: string): Promise<Team> {
@@ -178,37 +181,86 @@ export async function updateMemberAccessLevel(teamId: string, userId: string, ac
   if (error) throw error
 }
 
+async function findAuthUserByEmail(email: string): Promise<User | null> {
+  let page = 1
+
+  while (true) {
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page,
+      perPage: AUTH_USER_PAGE_SIZE
+    })
+
+    if (error) throw error
+
+    const user = data.users.find((candidate) => candidate.email?.toLowerCase() === email)
+    if (user) return user
+
+    if (!data.nextPage || data.users.length < AUTH_USER_PAGE_SIZE) return null
+    page = data.nextPage
+  }
+}
+
+function hasConfirmedEmail(user: User): boolean {
+  return Boolean(user.email_confirmed_at || user.confirmed_at)
+}
+
+async function getExistingTeamInvite(teamId: string, email: string): Promise<TeamInvite> {
+  const { data, error } = await supabase
+    .from('team_invites')
+    .select('*')
+    .eq('team_id', teamId)
+    .eq('email', email)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+async function getOrCreateTeamInvite(teamId: string, email: string, invitedBy: string): Promise<TeamInvite> {
+  const { data, error } = await supabase
+    .from('team_invites')
+    .insert({ team_id: teamId, email, invited_by: invitedBy })
+    .select()
+    .single()
+
+  if (!error) return data
+  if (error.code === '23505') return getExistingTeamInvite(teamId, email)
+  throw error
+}
+
+async function sendInviteEmail(email: string, redirectTo?: string): Promise<void> {
+  const { error } = await supabase.auth.admin.inviteUserByEmail(email, {
+    redirectTo: redirectTo || undefined
+  })
+
+  if (error) throw error
+}
+
+async function resendSignupConfirmation(email: string, redirectTo?: string): Promise<void> {
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined
+  })
+
+  if (error) throw error
+}
+
 // Invite a user by email
 export async function inviteToTeam(teamId: string, email: string, invitedBy: string, redirectTo?: string): Promise<TeamInvite> {
   const normalizedEmail = email.toLowerCase()
 
-  // Store invite in database
-  const { data, error } = await supabase
-    .from('team_invites')
-    .insert({ team_id: teamId, email: normalizedEmail, invited_by: invitedBy })
-    .select()
-    .single()
+  const invite = await getOrCreateTeamInvite(teamId, normalizedEmail, invitedBy)
+  const existingUser = await findAuthUserByEmail(normalizedEmail)
 
-  if (error) throw error
-
-  // Check if user already exists
-  const { data: existingUsers } = await supabase.auth.admin.listUsers()
-  const userExists = existingUsers?.users?.some(u => u.email?.toLowerCase() === normalizedEmail)
-
-  if (!userExists) {
-    // Send Supabase invite email for new user
-    try {
-      await supabase.auth.admin.inviteUserByEmail(normalizedEmail, {
-        redirectTo: redirectTo || undefined,
-      })
-    } catch (inviteError) {
-      console.error('Failed to send invite email:', inviteError)
-      // Don't fail the invite if email fails - they can still sign up manually
-    }
+  if (!existingUser) {
+    await sendInviteEmail(normalizedEmail, redirectTo)
+  } else if (!hasConfirmedEmail(existingUser)) {
+    await resendSignupConfirmation(normalizedEmail, redirectTo)
   }
   // For existing users, they'll see the invite when they log in via processInvitesForUser()
 
-  return data
+  return invite
 }
 
 // Get pending invites for a team
