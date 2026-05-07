@@ -1,5 +1,4 @@
-import type { User } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
+import { supabase, supabaseAnon } from '../lib/supabase'
 
 export interface Team {
   id: string
@@ -24,8 +23,6 @@ export interface TeamInvite {
   invited_by: string | null
   created_at: string
 }
-
-const AUTH_USER_PAGE_SIZE = 1000
 
 // Create a new team (called on signup)
 export async function createTeam(ownerId: string, name: string): Promise<Team> {
@@ -181,29 +178,6 @@ export async function updateMemberAccessLevel(teamId: string, userId: string, ac
   if (error) throw error
 }
 
-async function findAuthUserByEmail(email: string): Promise<User | null> {
-  let page = 1
-
-  while (true) {
-    const { data, error } = await supabase.auth.admin.listUsers({
-      page,
-      perPage: AUTH_USER_PAGE_SIZE
-    })
-
-    if (error) throw error
-
-    const user = data.users.find((candidate) => candidate.email?.toLowerCase() === email)
-    if (user) return user
-
-    if (!data.nextPage || data.users.length < AUTH_USER_PAGE_SIZE) return null
-    page = data.nextPage
-  }
-}
-
-function hasConfirmedEmail(user: User): boolean {
-  return Boolean(user.email_confirmed_at || user.confirmed_at)
-}
-
 async function getExistingTeamInvite(teamId: string, email: string): Promise<TeamInvite> {
   const { data, error } = await supabase
     .from('team_invites')
@@ -233,14 +207,27 @@ async function sendInviteEmail(email: string, redirectTo?: string): Promise<void
     redirectTo: redirectTo || undefined
   })
 
-  if (error) throw error
+  if (!error) return
+  if (!isAlreadyRegisteredAuthError(error)) throw error
+  await sendSignInEmail(email, redirectTo)
 }
 
-async function resendSignupConfirmation(email: string, redirectTo?: string): Promise<void> {
-  const { error } = await supabase.auth.resend({
-    type: 'signup',
+function isAlreadyRegisteredAuthError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const message = 'message' in error && typeof error.message === 'string'
+    ? error.message.toLowerCase()
+    : ''
+
+  return message.includes('already') && (message.includes('registered') || message.includes('exists'))
+}
+
+async function sendSignInEmail(email: string, redirectTo?: string): Promise<void> {
+  const { error } = await supabaseAnon.auth.signInWithOtp({
     email,
-    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined
+    options: {
+      shouldCreateUser: false,
+      ...(redirectTo ? { emailRedirectTo: redirectTo } : {})
+    }
   })
 
   if (error) throw error
@@ -251,14 +238,8 @@ export async function inviteToTeam(teamId: string, email: string, invitedBy: str
   const normalizedEmail = email.toLowerCase()
 
   const invite = await getOrCreateTeamInvite(teamId, normalizedEmail, invitedBy)
-  const existingUser = await findAuthUserByEmail(normalizedEmail)
-
-  if (!existingUser) {
-    await sendInviteEmail(normalizedEmail, redirectTo)
-  } else if (!hasConfirmedEmail(existingUser)) {
-    await resendSignupConfirmation(normalizedEmail, redirectTo)
-  }
-  // For existing users, they'll see the invite when they log in via processInvitesForUser()
+  await sendInviteEmail(normalizedEmail, redirectTo)
+  // After sign-in, processInvitesForUser() attaches the pending team invite.
 
   return invite
 }
