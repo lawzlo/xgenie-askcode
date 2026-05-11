@@ -735,29 +735,27 @@ export async function addReposToProject(
     throw new Error(`Repository already exists in project: ${duplicates[0].gitUrl}`)
   }
 
-  // Clone new repos to workspace (detect branch if not provided)
-  const workspacePath = projectData.workspace_path
+  const projectCredentials =
+    projectData.credentials &&
+    typeof projectData.credentials === 'object' &&
+    typeof projectData.credentials.token === 'string'
+      ? { token: projectData.credentials.token }
+      : undefined
+  const effectiveCredentials = credentials || projectCredentials
+  const providerId = gitProviderId || projectData.git_provider_id || undefined
+
+  // Detect branch if not provided, then let the worker clone in the shared workspace.
   const reposWithBranch: { gitUrl: string; branch: string; name: string }[] = []
   for (const repo of repos) {
     const branch =
       repo.branch ||
       await detectDefaultBranch(
         repo.gitUrl,
-        gitProviderId || projectData.git_provider_id || undefined,
+        providerId,
         teamId,
-        credentials
+        effectiveCredentials
       )
     reposWithBranch.push({ gitUrl: repo.gitUrl, branch, name: repo.name })
-    const repoPath = path.join(workspacePath, repo.name)
-    await cloneRepositoryToPath(
-      repo.gitUrl,
-      branch,
-      repoPath,
-      gitProviderId || projectData.git_provider_id,
-      teamId,
-      credentials,
-      repo.name
-    )
   }
 
   // Update git_urls in database
@@ -766,13 +764,18 @@ export async function addReposToProject(
     ...reposWithBranch.map(r => ({ url: r.gitUrl, branch: r.branch, name: r.name }))
   ]
 
+  const updateValues: Record<string, unknown> = {
+    git_urls: newGitUrls,
+    sync_status: 'pending',
+    sync_error: null
+  }
+  if (credentials?.token && !gitProviderId) {
+    updateValues.credentials = { token: credentials.token }
+  }
+
   await updateProjectRow(
     projectId,
-    {
-      git_urls: newGitUrls,
-      sync_status: 'pending',
-      sync_error: null
-    },
+    updateValues,
     { teamId, errorPrefix: 'Failed to update project' }
   )
 
@@ -784,7 +787,7 @@ export async function addReposToProject(
 
   await enqueueProjectJob(project.id, teamId, 'add_repos', {
     repos: reposWithBranch,
-    gitProviderId: gitProviderId || project.gitProviderId,
+    gitProviderId: providerId,
     credentials: credentials ? { token: credentials.token } : undefined
   })
 
@@ -966,6 +969,7 @@ export async function processProjectJob(job: ProjectJob): Promise<void> {
   const payload = job.payload && typeof job.payload === 'object' ? job.payload : {}
   const credentials = (payload as { credentials?: { token?: string } }).credentials
   const jobCredentials = credentials?.token ? { token: credentials.token } : undefined
+  const effectiveJobCredentials = jobCredentials || project.credentials
 
   await updateProjectSyncState(project.id, 'syncing')
 
@@ -998,7 +1002,7 @@ export async function processProjectJob(job: ProjectJob): Promise<void> {
           repoPath,
           providerId || project.gitProviderId,
           project.teamId,
-          jobCredentials,
+          effectiveJobCredentials,
           repo.name
         )
       }
