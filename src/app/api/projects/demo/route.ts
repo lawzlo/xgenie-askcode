@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { createDemoProject, hasDemoTemplate } from '../../../../services/project'
 import { jsonResponse, optionsResponse, requireAuth, requireTeamId } from '../../../../server/api'
+import { safeProject } from '../../../../server/projects'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
 
     const project = await createDemoProject(auth.user!.id, team.teamId!)
 
-    return jsonResponse(project, 201)
+    return jsonResponse(safeProject(project), 201)
   } catch (error) {
     console.error('Failed to create demo project:', error)
 

@@ -334,7 +334,7 @@ export async function getUserAccessLevel(teamId: string, userId: string): Promis
     .eq('user_id', userId)
     .single()
 
-  return member?.access_level ?? 60
+  return member?.access_level ?? 0
 }
 
 // Leave a team (member only, not owner)

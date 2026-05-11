@@ -1,7 +1,7 @@
 'use client'
 
 import type { EditRepoSelection, GitProvider, Project, ProjectRepo, ProviderRepo } from '../_types'
-import { truncateUrl } from '../_lib/utils'
+import { normalizeGitUrl, truncateUrl } from '../_lib/utils'
 
 type EditProjectModalProps = {
   open: boolean
@@ -82,6 +82,8 @@ export function EditProjectModal({
 
         <div style={{ marginBottom: 15 }}>
           {editingProjectRepos.map((repo) => {
+            const isPrimaryRepo =
+              normalizeGitUrl(editingProject.gitUrl) === normalizeGitUrl(repo.url)
             const branchValue = editExistingRepoBranches[repo.url] ?? repo.branch
             const isSavingBranch = editExistingRepoSavingUrl === repo.url
             const isBranchUnchanged = branchValue.trim() === repo.branch
@@ -132,7 +134,7 @@ export function EditProjectModal({
                   >
                     {isSavingBranch ? 'saving...' : 'save branch'}
                   </button>
-                  {editingProjectRepos.length > 1 ? (
+                  {editingProjectRepos.length > 1 && !isPrimaryRepo ? (
                     <button
                       type="button"
                       className="link-button"

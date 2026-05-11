@@ -16,14 +16,15 @@
     "@anthropic-ai/sdk": "^0.32.0",
     "@octokit/auth-app": "^8.1.2",
     "@supabase/supabase-js": "^2.47.0",
+    "dompurify": "^3.4.2",
     "dotenv": "^16.4.5",
-    "glob": "^11.0.0",
+    "glob": "^13.0.6",
     "marked": "^15.0.7",
-    "next": "16.1.5",
+    "next": "16.2.6",
     "octokit": "^5.0.5",
     "react": "19.2.1",
     "react-dom": "19.2.1",
-    "simple-git": "^3.27.0",
+    "simple-git": "^3.36.0",
     "tsx": "^4.20.6",
     "uuid": "^10.0.0",
     "zod": "^3.23.8"
@@ -34,7 +35,12 @@
     "@types/react-dom": "^19.0.0",
     "@types/uuid": "^10.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.1.5",
+    "eslint-config-next": "16.2.6",
     "typescript": "^5.6.0"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.10"
+    }
   }
 }

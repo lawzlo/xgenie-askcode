@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { marked } from 'marked'
+import { renderMarkdown } from '../../_lib/markdown'
 
 type SharedConversation = {
   question: string
@@ -144,7 +144,7 @@ export function ShareContent({ token }: { token: string }) {
           </div>
           <div
             className="chat-content"
-            dangerouslySetInnerHTML={{ __html: marked.parse(data.answer) }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(data.answer) }}
           />
         </div>
 

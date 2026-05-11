@@ -283,6 +283,17 @@ export async function updateGitProviderTokens(
 
 // Delete a git provider
 export async function deleteGitProvider(id: string, teamId: string): Promise<void> {
+  const { count, error: countError } = await supabase
+    .from('projects')
+    .select('id', { count: 'exact', head: true })
+    .eq('team_id', teamId)
+    .eq('git_provider_id', id)
+
+  if (countError) throw countError
+  if ((count || 0) > 0) {
+    throw new Error(`Provider is used by ${count} project${count === 1 ? '' : 's'}. Reassign or delete those projects first.`)
+  }
+
   const { error } = await supabase
     .from('git_providers')
     .delete()

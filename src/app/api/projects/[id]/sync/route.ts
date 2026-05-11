@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { formatProjectSyncError, getProject, syncProject, updateProjectSyncState } from '../../../../../services/project'
 import { getGitProvider, refreshGiteaToken } from '../../../../../services/git-provider'
 import { getRequestOrigin, jsonResponse, optionsResponse, requireAuth, requireTeamId } from '../../../../../server/api'
+import { safeProject } from '../../../../../server/projects'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -58,10 +59,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const synced = await syncProject(id, team.teamId!)
     return jsonResponse(
-      {
-        ...synced,
-        credentials: synced.credentials ? { hasToken: true } : undefined
-      },
+      safeProject(synced),
       202
     )
   } catch (error) {

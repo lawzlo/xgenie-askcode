@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { createProject, listProjects } from '../../../services/project'
 import { getSavedCredential } from '../../../services/saved-credential'
 import { requireAuth, requireTeamId, jsonResponse, optionsResponse, parseJson } from '../../../server/api'
+import { safeProject, safeProjects } from '../../../server/projects'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,7 +13,7 @@ const CreateProjectSchema = z.object({
   branch: z.string().optional(),
   credentials: z
     .object({
-      token: z.string()
+      token: z.string().min(1)
     })
     .optional(),
   gitProviderId: z.string().uuid().optional(),
@@ -28,12 +29,7 @@ export async function GET(request: Request) {
     if (team.response) return team.response
 
     const projects = await listProjects(team.teamId!)
-    const safeProjects = projects.map(project => ({
-      ...project,
-      credentials: project.credentials ? { hasToken: true } : undefined
-    }))
-
-    return jsonResponse(safeProjects)
+    return jsonResponse(safeProjects(projects))
   } catch {
     return jsonResponse({ error: 'Failed to list projects' }, 500)
   }
@@ -69,8 +65,7 @@ export async function POST(request: Request) {
     const project = await createProject(auth.user!.id, team.teamId!, projectData)
     return jsonResponse(
       {
-        ...project,
-        credentials: project.credentials ? { hasToken: true } : undefined
+        ...safeProject(project)
       },
       201
     )

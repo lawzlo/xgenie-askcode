@@ -100,36 +100,77 @@ if (migrationFiles.length === 0) {
 
 console.log(`📝 Found ${migrationFiles.length} migration file(s)`);
 
+function escapeSql(value) {
+  return value.replace(/'/g, "''");
+}
+
+function runPsql(sql, options = {}) {
+  return execSync(`psql "${databaseUrl}" -v ON_ERROR_STOP=1 ${options.tuplesOnly ? '-t -A ' : ''}-c "${sql.replace(/"/g, '\\"')}"`, {
+    stdio: options.stdio || 'pipe',
+    encoding: 'utf-8'
+  });
+}
+
+function runMigrationFile(filePath) {
+  return execSync(`psql "${databaseUrl}" -v ON_ERROR_STOP=1 -f "${filePath}"`, {
+    stdio: 'pipe',
+    encoding: 'utf-8'
+  });
+}
+
+runPsql(`
+  CREATE TABLE IF NOT EXISTS public.schema_migrations (
+    filename TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )
+`);
+
+const appliedOutput = runPsql(
+  'SELECT filename FROM public.schema_migrations ORDER BY filename',
+  { tuplesOnly: true }
+).trim();
+const appliedMigrations = new Set(appliedOutput ? appliedOutput.split('\n').filter(Boolean) : []);
+
+const hasExistingAppSchema = runPsql(
+  "SELECT to_regclass('public.projects') IS NOT NULL",
+  { tuplesOnly: true }
+).trim() === 't';
+
+if (appliedMigrations.size === 0 && hasExistingAppSchema) {
+  const legacyMigrations = migrationFiles.filter(file => file.localeCompare('024_project_schema_repair.sql') < 0);
+  for (const file of legacyMigrations) {
+    runPsql(`INSERT INTO public.schema_migrations(filename) VALUES ('${escapeSql(file)}') ON CONFLICT DO NOTHING`);
+    appliedMigrations.add(file);
+  }
+  console.log(`🧭 Existing schema detected; baselined ${legacyMigrations.length} legacy migration(s)`);
+}
+
 let successCount = 0;
 let skipCount = 0;
 let errorCount = 0;
 
 for (const file of migrationFiles) {
   const filePath = path.join(migrationsDir, file);
+
+  if (appliedMigrations.has(file)) {
+    console.log(`  ⏭️  ${file} already recorded`);
+    skipCount++;
+    continue;
+  }
+
   console.log(`  Applying: ${file}...`);
 
   try {
-    // Use -v ON_ERROR_STOP=1 to make psql exit on SQL errors
-    execSync(`psql "${databaseUrl}" -v ON_ERROR_STOP=1 -f "${filePath}"`, {
-      stdio: 'pipe',
-      encoding: 'utf-8'
-    });
+    runMigrationFile(filePath);
+    runPsql(`INSERT INTO public.schema_migrations(filename) VALUES ('${escapeSql(file)}') ON CONFLICT DO NOTHING`);
     console.log(`  ✅ ${file} applied successfully`);
     successCount++;
   } catch (error) {
     const errorMessage = error.stderr ? error.stderr.toString() : error.message;
 
-    // Check for common "already applied" patterns
-    if (errorMessage.includes('already exists') ||
-        errorMessage.includes('duplicate key') ||
-        errorMessage.includes('multiple primary keys')) {
-      console.log(`  ⏭️  ${file} already applied (skipped)`);
-      skipCount++;
-    } else {
-      console.error(`  ❌ ${file} failed:`);
-      console.error(`     ${errorMessage.split('\n')[0]}`);
-      errorCount++;
-    }
+    console.error(`  ❌ ${file} failed:`);
+    console.error(`     ${errorMessage.split('\n')[0]}`);
+    errorCount++;
   }
 }
 
