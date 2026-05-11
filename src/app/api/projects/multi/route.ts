@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { createMultiRepoProject } from '../../../../services/project'
 import { jsonResponse, optionsResponse, parseJson, requireAuth, requireTeamId } from '../../../../server/api'
+import { safeProject } from '../../../../server/projects'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     }
 
     const project = await createMultiRepoProject(auth.user!.id, team.teamId!, parsed.data)
-    return jsonResponse(project, 201)
+    return jsonResponse(safeProject(project), 201)
   } catch (error) {
     console.error('Failed to create multi repo project:', error)
     return jsonResponse(

@@ -1,6 +1,6 @@
 'use client'
 
-import { marked } from 'marked'
+import { renderMarkdown } from '../_lib/markdown'
 
 type SavedConversation = {
   id: string
@@ -78,7 +78,7 @@ export function SavedModal({
               </div>
               <div
                 className="chat-content"
-                dangerouslySetInnerHTML={{ __html: marked.parse(viewing.answer) }}
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(viewing.answer) }}
               />
             </div>
 

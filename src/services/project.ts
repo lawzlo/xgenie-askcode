@@ -179,6 +179,34 @@ type ProjectRow = {
   sync_error: string | null
 }
 
+type ProjectJobPayload = Record<string, unknown> | null
+
+function mergeAddReposPayload(
+  existingPayload: ProjectJobPayload,
+  nextPayload: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const existing = existingPayload && typeof existingPayload === 'object' ? existingPayload : {}
+  const next = nextPayload || {}
+  const existingRepos = Array.isArray(existing.repos) ? existing.repos as RepoInfo[] : []
+  const nextRepos = Array.isArray(next.repos) ? next.repos as RepoInfo[] : []
+  const seen = new Set(existingRepos.map((repo) => normalizeRepoUrl(repo.gitUrl)))
+  const repos = [...existingRepos]
+
+  for (const repo of nextRepos) {
+    const normalized = normalizeRepoUrl(repo.gitUrl)
+    if (!seen.has(normalized)) {
+      seen.add(normalized)
+      repos.push(repo)
+    }
+  }
+
+  return {
+    ...existing,
+    ...next,
+    repos
+  }
+}
+
 function mapProjectRow(row: ProjectRow, fallbackSyncError?: string | null): Project {
   return {
     id: row.id,
@@ -288,16 +316,34 @@ async function enqueueProjectJob(
 ): Promise<void> {
   const { data: existing, error: existingError } = await supabase
     .from('project_jobs')
-    .select('id')
+    .select('id, status, payload')
     .eq('project_id', projectId)
     .eq('type', type)
     .in('status', ['queued', 'running'])
+    .order('created_at', { ascending: true })
     .limit(1)
 
   if (existingError) {
     throw new Error(`Failed to check existing jobs: ${existingError.message}`)
   }
-  if (existing && existing.length > 0) return
+  const activeJob = existing?.[0] as { id: string; status: ProjectJobStatus; payload: ProjectJobPayload } | undefined
+  if (activeJob) {
+    if (type === 'add_repos' && activeJob.status === 'queued') {
+      const { error } = await supabase
+        .from('project_jobs')
+        .update({
+          payload: mergeAddReposPayload(activeJob.payload, payload),
+          error: null,
+          run_after: new Date().toISOString()
+        })
+        .eq('id', activeJob.id)
+
+      if (error) {
+        throw new Error(`Failed to update existing project job: ${error.message}`)
+      }
+    }
+    if (type !== 'add_repos' || activeJob.status === 'queued') return
+  }
 
   const { error } = await supabase
     .from('project_jobs')
@@ -331,6 +377,24 @@ export async function updateProjectSyncState(
     update.sync_error = null
   }
   await updateProjectRow(projectId, update, { errorPrefix: 'Failed to update sync status' })
+}
+
+async function enqueueProjectJobOrMarkError(
+  projectId: string,
+  teamId: string,
+  type: ProjectJobType,
+  payload?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await enqueueProjectJob(projectId, teamId, type, payload)
+  } catch (error) {
+    try {
+      await updateProjectSyncState(projectId, 'error', { syncError: formatProjectSyncError(error) })
+    } catch (stateError) {
+      console.error('Failed to persist project job enqueue error:', formatProjectSyncError(stateError))
+    }
+    throw error
+  }
 }
 
 async function updateStoredProjectBranch(
@@ -380,24 +444,41 @@ async function syncRepoAtPath(
 ): Promise<void> {
   try {
     await fs.access(repoPath)
-    const git = simpleGit(repoPath)
-    const branchSummary = await git.branchLocal()
-    if (branchSummary.current !== branch) {
+  } catch {
+    console.log(`Repo ${repoLabel} missing, cloning...`)
+    await cloneProjectRepo(project, gitUrl, branch, repoPath, repoLabel)
+    return
+  }
+
+  const git = simpleGit(repoPath)
+  const branchSummary = await git.branchLocal()
+  if (branchSummary.current !== branch) {
+    if (options.removeOnFailure === false) {
       throw new Error(`Repository branch mismatch: expected ${branch} but found ${branchSummary.current || 'unknown'}`)
+    }
+    await fs.rm(repoPath, { recursive: true, force: true })
+    console.log(`Repo ${repoLabel} is on ${branchSummary.current || 'unknown'}, recloning ${branch}...`)
+    await cloneProjectRepo(project, gitUrl, branch, repoPath, repoLabel)
+    return
+  }
+
+  const { cloneUrl, hasAuth } = await resolveCloneUrl(gitUrl, project.gitProviderId, project.teamId, project.credentials)
+  try {
+    if (hasAuth && cloneUrl !== gitUrl) {
+      await git.remote(['set-url', 'origin', cloneUrl])
     }
     await git.pull('origin', branch)
     console.log(`Pulled ${repoLabel} successfully`)
   } catch (error) {
-    if (options.removeOnFailure === false) {
-      throw error
+    throw new Error(formatRepoSyncError(repoLabel, branch, error))
+  } finally {
+    if (hasAuth && cloneUrl !== gitUrl) {
+      try {
+        await git.remote(['set-url', 'origin', gitUrl])
+      } catch (resetError) {
+        console.warn(`Failed to restore unauthenticated origin for ${repoLabel}:`, formatProjectSyncError(resetError))
+      }
     }
-    try {
-      await fs.rm(repoPath, { recursive: true, force: true })
-    } catch {
-      // Ignore if directory doesn't exist
-    }
-    console.log(`Repo ${repoLabel} missing, corrupted, or on the wrong branch, cloning...`)
-    await cloneProjectRepo(project, gitUrl, branch, repoPath, repoLabel)
   }
 }
 
@@ -563,7 +644,7 @@ export async function createProject(
     syncError: null
   }
 
-  await enqueueProjectJob(project.id, teamId, 'clone')
+  await enqueueProjectJobOrMarkError(project.id, teamId, 'clone')
 
   return project
 }
@@ -626,7 +707,12 @@ export async function syncProject(
     throw new Error(`Project not found: ${id}`)
   }
 
-  if (project.syncStatus === 'syncing' || project.syncStatus === 'pending') {
+  if (project.syncStatus === 'syncing') {
+    return project
+  }
+
+  if (project.syncStatus === 'pending') {
+    await enqueueProjectJobOrMarkError(project.id, teamId, 'sync', credentials ? { credentials } : undefined)
     return project
   }
 
@@ -637,7 +723,7 @@ export async function syncProject(
   await updateProjectSyncState(project.id, 'pending')
   project.syncStatus = 'pending'
   project.syncError = null
-  await enqueueProjectJob(project.id, teamId, 'sync', credentials ? { credentials } : undefined)
+  await enqueueProjectJobOrMarkError(project.id, teamId, 'sync', credentials ? { credentials } : undefined)
 
   return project
 }
@@ -720,7 +806,7 @@ export async function createMultiRepoProject(
     syncError: null
   }
 
-  await enqueueProjectJob(project.id, teamId, 'clone')
+  await enqueueProjectJobOrMarkError(project.id, teamId, 'clone')
 
   return project
 }
@@ -808,7 +894,7 @@ export async function addReposToProject(
     throw new Error('Failed to get updated project')
   }
 
-  await enqueueProjectJob(project.id, teamId, 'add_repos', {
+  await enqueueProjectJobOrMarkError(project.id, teamId, 'add_repos', {
     repos: reposWithBranch,
     gitProviderId: providerId,
     credentials: credentials ? { token: credentials.token } : undefined
@@ -841,6 +927,9 @@ export async function removeRepoFromProject(
   type DbRepoInfo = { url: string; branch: string; name: string }
   const existingGitUrls: DbRepoInfo[] = projectData.git_urls || []
   const normalizedRepoUrl = normalizeRepoUrl(repoUrl)
+  if (projectData.git_url && normalizeRepoUrl(projectData.git_url) === normalizedRepoUrl) {
+    throw new Error('Primary repository cannot be removed. Delete the project or create a new project without it.')
+  }
   const repoToRemove = existingGitUrls.find((repo) => normalizeRepoUrl(repo.url) === normalizedRepoUrl)
 
   if (!repoToRemove) {
@@ -953,7 +1042,7 @@ export async function updateProjectRepoBranch(
     )
   }
 
-  await enqueueProjectJob(projectId, teamId, 'sync')
+  await enqueueProjectJobOrMarkError(projectId, teamId, 'sync')
 
   const updatedProject = await getProject(projectId, teamId)
   if (!updatedProject) {
@@ -979,8 +1068,14 @@ async function cloneRepositoryToPath(
   try {
     const git = simpleGit()
     await git.clone(cloneUrl, targetPath, ['--branch', branch, '--single-branch'])
+    await simpleGit(targetPath).remote(['set-url', 'origin', gitUrl])
     console.log(`Cloned ${repoLabel} successfully`)
   } catch (err) {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true })
+    } catch {
+      // Ignore clone cleanup failures.
+    }
     const message = formatRepoSyncError(repoLabel, branch, err)
     console.error(`Failed to clone ${repoLabel}: ${message}`)
     throw new Error(message)
@@ -1090,7 +1185,7 @@ export async function createDemoProject(
     throw new Error(`Failed to create demo project: ${error.message}`)
   }
 
-  await enqueueProjectJob(data.id, teamId, 'clone')
+  await enqueueProjectJobOrMarkError(data.id, teamId, 'clone')
 
   return {
     id: data.id,

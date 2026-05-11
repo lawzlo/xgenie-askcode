@@ -115,7 +115,7 @@ const HighlightedLine: React.FC<{ line: string }> = ({ line }) => {
     return (
       <>
         <HighlightedLine line={code} />
-        <span style={{ color: commentColor }}>//{comment}</span>
+        <span style={{ color: commentColor }}>{`//${comment}`}</span>
       </>
     );
   }

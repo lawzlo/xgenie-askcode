@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { deleteProject, getProject } from '../../../../services/project'
 import { jsonResponse, noContentResponse, optionsResponse, requireAuth, requireTeamId } from '../../../../server/api'
+import { safeProject } from '../../../../server/projects'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -23,10 +24,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       return jsonResponse({ error: 'Project not found' }, 404)
     }
 
-    return jsonResponse({
-      ...project,
-      credentials: project.credentials ? { hasToken: true } : undefined
-    })
+    return jsonResponse(safeProject(project))
   } catch {
     return jsonResponse({ error: 'Failed to get project' }, 500)
   }

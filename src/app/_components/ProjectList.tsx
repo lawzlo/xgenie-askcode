@@ -14,6 +14,17 @@ function truncateSyncError(syncError?: string | null, maxLength = 140): string {
   return `${message.slice(0, maxLength - 3)}...`
 }
 
+function getSyncErrorHint(syncError?: string | null): string | null {
+  const message = getSyncErrorText(syncError)
+  if (/write access|not granted|authentication failed|permission denied|could not read username|repository not found|unable to access/i.test(message)) {
+    return 'Check provider installation or saved token access, then sync again.'
+  }
+  if (/branch mismatch|remote branch|couldn't find remote ref|not found in upstream/i.test(message)) {
+    return 'Check the configured branch in edit, then sync again.'
+  }
+  return null
+}
+
 function getDisplayRepos(project: Project) {
   const repos = project.gitUrls && project.gitUrls.length > 0 ? [...project.gitUrls] : []
   if (project.gitUrl) {
@@ -103,6 +114,7 @@ export function ProjectList({
           const isError = project.syncStatus === 'error'
           const isDisabled = isSyncing
           const syncErrorText = getSyncErrorText(project.syncError)
+          const syncErrorHint = getSyncErrorHint(project.syncError)
           const displayRepos = getDisplayRepos(project)
 
           return (
@@ -194,6 +206,7 @@ export function ProjectList({
                 {isError && (
                   <div style={{ marginTop: 4, color: '#c00', fontSize: '9pt' }} title={syncErrorText}>
                     sync failed: {truncateSyncError(project.syncError)}
+                    {syncErrorHint ? <div style={{ color: '#828282' }}>{syncErrorHint}</div> : null}
                   </div>
                 )}
               </div>

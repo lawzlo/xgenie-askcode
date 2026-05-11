@@ -2,10 +2,47 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { glob } from 'glob'
 
+function pathSegments(value: string): string[] {
+  return value.split(/[\\/]+/).filter(Boolean)
+}
+
+function isAbsolutePath(value: string): boolean {
+  return path.isAbsolute(value) || path.win32.isAbsolute(value)
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+  const relative = path.relative(parentPath, childPath)
+  return relative === '' || (!relative.startsWith('..') && !isAbsolutePath(relative))
+}
+
+function assertSafeRelativePath(filePath: string): void {
+  if (isAbsolutePath(filePath)) {
+    throw new Error('Absolute paths are not allowed')
+  }
+
+  const segments = pathSegments(filePath)
+  if (segments.includes('..')) {
+    throw new Error('Path traversal attempt detected')
+  }
+  if (segments.includes('.git')) {
+    throw new Error('Git metadata is not readable')
+  }
+}
+
+function assertSafeGlobPattern(pattern: string): void {
+  if (!pattern.trim()) {
+    throw new Error('Search pattern is required')
+  }
+  assertSafeRelativePath(pattern)
+}
+
 // Security: ensure path is within workspace
 function securePath(workspacePath: string, filePath: string): string {
-  const resolved = path.resolve(workspacePath, filePath)
-  if (!resolved.startsWith(path.resolve(workspacePath))) {
+  assertSafeRelativePath(filePath)
+
+  const workspaceRoot = path.resolve(workspacePath)
+  const resolved = path.resolve(workspaceRoot, filePath)
+  if (!isPathInside(workspaceRoot, resolved)) {
     throw new Error('Path traversal attempt detected')
   }
   return resolved
@@ -53,12 +90,24 @@ export async function searchFiles(
   workspacePath: string,
   pattern: string
 ): Promise<string[]> {
+  assertSafeGlobPattern(pattern)
+
   const results = await glob(pattern, {
     cwd: workspacePath,
     ignore: ['node_modules/**', '.git/**', 'dist/**', 'build/**', '*.lock'],
     nodir: true
   })
-  return results.slice(0, 100) // Limit results
+
+  return results
+    .filter((file) => {
+      try {
+        securePath(workspacePath, file)
+        return true
+      } catch {
+        return false
+      }
+    })
+    .slice(0, 100) // Limit results
 }
 
 export async function grepContent(
@@ -66,6 +115,8 @@ export async function grepContent(
   searchTerm: string,
   filePattern: string = '**/*'
 ): Promise<Array<{ file: string; line: number; content: string }>> {
+  assertSafeGlobPattern(filePattern)
+
   const files = await glob(filePattern, {
     cwd: workspacePath,
     ignore: ['node_modules/**', '.git/**', 'dist/**', 'build/**', '*.lock', '**/*.png', '**/*.jpg', '**/*.ico'],
@@ -78,6 +129,10 @@ export async function grepContent(
   for (const file of files.slice(0, 500)) { // Limit files to search
     try {
       const fullPath = securePath(workspacePath, file)
+      const stat = await fs.stat(fullPath)
+      if (stat.size > 1024 * 1024) {
+        continue
+      }
       const content = await fs.readFile(fullPath, 'utf-8')
       const lines = content.split('\n')
 

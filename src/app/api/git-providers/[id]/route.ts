@@ -76,6 +76,9 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return jsonResponse({ success: true })
   } catch (error) {
     console.error('Error deleting git provider:', error)
+    if (error instanceof Error && error.message.includes('Provider is used by')) {
+      return jsonResponse({ error: error.message }, 400)
+    }
     return jsonResponse({ error: 'Failed to delete git provider' }, 500)
   }
 }

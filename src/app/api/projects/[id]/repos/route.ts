@@ -9,6 +9,7 @@ import {
   requireAuth,
   requireTeamId
 } from '../../../../../server/api'
+import { safeProject } from '../../../../../server/projects'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,7 +30,7 @@ const AddReposSchema = z.object({
     .min(1),
   gitProviderId: z.string().uuid().optional(),
   credentials: z.object({
-    token: z.string()
+    token: z.string().min(1)
   }).optional(),
   savedCredentialId: z.string().uuid().optional()
 })
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       parsed.data.gitProviderId,
       credentials
     )
-    return jsonResponse(project)
+    return jsonResponse(safeProject(project))
   } catch (error) {
     console.error('Failed to add repos to project:', error)
     if (error instanceof Error && error.message.includes('not found')) {
@@ -116,11 +117,14 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     }
 
     const project = await removeRepoFromProject(id, team.teamId!, repoUrl)
-    return jsonResponse(project)
+    return jsonResponse(safeProject(project))
   } catch (error) {
     console.error('Failed to remove repo from project:', error)
     if (error instanceof Error && error.message.includes('not found')) {
       return jsonResponse({ error: error.message }, 404)
+    }
+    if (error instanceof Error && error.message.includes('cannot be removed')) {
+      return jsonResponse({ error: error.message }, 400)
     }
     return jsonResponse(
       {
@@ -155,7 +159,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       parsed.data.repoUrl,
       parsed.data.branch
     )
-    return jsonResponse(project)
+    return jsonResponse(safeProject(project))
   } catch (error) {
     console.error('Failed to update repo branch:', error)
     if (error instanceof Error && error.message.includes('not found')) {

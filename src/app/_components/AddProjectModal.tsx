@@ -279,7 +279,7 @@ export function AddProjectModal({
             ) : null}
             <div className="form-actions">
               <button type="submit" className="submit-btn" disabled={addProjectLoading}>
-                {addProjectLoading ? 'cloning...' : 'add'}
+                {addProjectLoading ? 'adding...' : 'add'}
               </button>
               <span className="cancel-link" onClick={onClose}>
                 cancel

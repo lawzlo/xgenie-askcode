@@ -2,8 +2,8 @@
 
 import type { RefObject } from 'react'
 import { useState } from 'react'
-import { marked } from 'marked'
 import type { Message } from '../_types'
+import { renderMarkdown } from '../_lib/markdown'
 import { timeAgo } from '../_lib/utils'
 
 type ConversationSectionProps = {
@@ -115,7 +115,7 @@ export function ConversationSection({
                   </div>
                   <div
                     className="chat-content"
-                    dangerouslySetInnerHTML={{ __html: marked.parse(message.answer) }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(message.answer) }}
                   />
                   {message.id && (
                     <div className="chat-actions">

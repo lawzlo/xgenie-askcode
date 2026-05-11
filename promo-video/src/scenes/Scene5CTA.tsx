@@ -1,5 +1,5 @@
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
-import { COLORS, FONTS, GITHUB_URL } from "../config/constants";
+import { COLORS, GITHUB_URL } from "../config/constants";
 
 export const Scene5CTA: React.FC = () => {
   const frame = useCurrentFrame();

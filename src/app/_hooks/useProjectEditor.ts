@@ -229,6 +229,20 @@ export function useProjectEditor({
       showToast('Please enter a git URL', 'error')
       return
     }
+    if (isPrivateRepo && credentialMode === 'saved' && !selectedCredentialId) {
+      showToast('Please select a saved token', 'error')
+      return
+    }
+    if (isPrivateRepo && credentialMode === 'new') {
+      if (!gitToken.trim()) {
+        showToast('Please enter a token for this private repository', 'error')
+        return
+      }
+      if (!(newCredentialName.trim() || inferCredentialName(gitUrl.trim()))) {
+        showToast('Please enter a name to save this token', 'error')
+        return
+      }
+    }
     setAddProjectLoading(true)
     try {
       // Resolve credentials: saved mode uses savedCredentialId, new mode uses inline token
@@ -238,14 +252,17 @@ export function useProjectEditor({
       if (isPrivateRepo) {
         if (credentialMode === 'saved' && selectedCredentialId) {
           savedCredentialIdPayload = selectedCredentialId
-        } else if (credentialMode === 'new' && gitToken) {
-          credentialsPayload = { token: gitToken }
+        } else if (credentialMode === 'new' && gitToken.trim()) {
+          credentialsPayload = { token: gitToken.trim() }
           // Always save the credential for reuse
           const credName = newCredentialName.trim() || inferCredentialName(gitUrl.trim())
-          if (credName) {
-            const platform = inferPlatform(gitUrl.trim())
-            await createSavedCredential(credName, platform, gitToken)
+          const platform = inferPlatform(gitUrl.trim())
+          const savedCredential = await createSavedCredential(credName, platform, gitToken.trim())
+          if (!savedCredential) {
+            throw new Error('Token was not saved; project was not added')
           }
+          savedCredentialIdPayload = savedCredential.id
+          credentialsPayload = undefined
         }
       }
 

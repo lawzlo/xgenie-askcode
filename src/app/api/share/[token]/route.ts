@@ -42,9 +42,8 @@ export async function GET(request: NextRequest, { params }: Params) {
       return jsonResponse({ error: 'Share link not found' }, 404)
     }
 
-    // Only check expiry for non-logged-in users
     const isExpired = new Date(share.expires_at) < new Date()
-    if (!user && isExpired) {
+    if (isExpired) {
       return jsonResponse({ error: 'Share link has expired' }, 410)
     }
 
