@@ -161,8 +161,6 @@ export function useAuth({ showToast }: UseAuthParams) {
     }
   }, [])
 
-  // Track previous session to detect changes
-  const prevSessionRef = useRef<string | null>(null)
   const hasInitializedTeams = useRef(false)
 
   // Handle auth state changes for teams and modals

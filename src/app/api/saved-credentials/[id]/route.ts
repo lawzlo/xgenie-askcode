@@ -23,8 +23,15 @@ export async function GET(request: NextRequest, { params }: Params) {
       return jsonResponse({ error: 'Saved credential not found' }, 404)
     }
 
-    const { credentials: _creds, ...safe } = credential
-    return jsonResponse({ ...safe, has_token: true })
+    return jsonResponse({
+      id: credential.id,
+      user_id: credential.user_id,
+      team_id: credential.team_id,
+      name: credential.name,
+      platform: credential.platform,
+      created_at: credential.created_at,
+      has_token: Boolean(credential.credentials.token)
+    })
   } catch {
     return jsonResponse({ error: 'Failed to get saved credential' }, 500)
   }

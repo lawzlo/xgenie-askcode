@@ -20,14 +20,26 @@ export async function GET(request: Request) {
     if (team.response) return team.response
 
     const credentials = await getSavedCredentials(team.teamId!)
-    const safe = credentials.map(({ credentials: _creds, ...rest }) => ({
-      ...rest,
-      has_token: true
+    const safe = credentials.map((credential) => ({
+      id: credential.id,
+      user_id: credential.user_id,
+      team_id: credential.team_id,
+      name: credential.name,
+      platform: credential.platform,
+      created_at: credential.created_at,
+      has_token: Boolean(credential.credentials.token)
     }))
 
     return jsonResponse(safe)
-  } catch {
-    return jsonResponse({ error: 'Failed to list saved credentials' }, 500)
+  } catch (error) {
+    console.error('Failed to list saved credentials:', error)
+    return jsonResponse(
+      {
+        error: 'Failed to list saved credentials',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
+      500
+    )
   }
 }
 
@@ -61,10 +73,17 @@ export async function POST(request: Request) {
       201
     )
   } catch (error) {
+    console.error('Failed to create saved credential:', error)
     if (error instanceof Error && error.message.includes('already exists')) {
       return jsonResponse({ error: error.message }, 409)
     }
-    return jsonResponse({ error: 'Failed to create saved credential' }, 500)
+    return jsonResponse(
+      {
+        error: 'Failed to create saved credential',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
+      500
+    )
   }
 }
 
