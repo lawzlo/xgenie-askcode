@@ -42,15 +42,21 @@ export function inferCredentialName(gitUrl: string): string {
 
 function getProjectRepos(project: Project | null | undefined): ProjectRepo[] {
   if (!project) return []
-  if (project.gitUrls && project.gitUrls.length > 0) {
-    return project.gitUrls
+  const repos = project.gitUrls && project.gitUrls.length > 0 ? [...project.gitUrls] : []
+  if (project.gitUrl) {
+    const normalizedPrimaryUrl = normalizeGitUrl(project.gitUrl)
+    const hasPrimaryRepo = repos.some((repo) => normalizeGitUrl(repo.url) === normalizedPrimaryUrl)
+    if (!hasPrimaryRepo) {
+      repos.unshift({
+        url: project.gitUrl,
+        branch: project.branch || 'main',
+        name: extractRepoName(project.gitUrl)
+      })
+    }
   }
-  if (!project.gitUrl) return []
-  return [{
-    url: project.gitUrl,
-    branch: project.branch || 'main',
-    name: extractRepoName(project.gitUrl)
-  }]
+  if (repos.length > 0) return repos
+
+  return []
 }
 
 function getProjectRepoUrlSet(project: Project | null | undefined): Set<string> {

@@ -105,10 +105,7 @@ export function AddProjectModal({
   const existingProviderRepoUrls = new Set<string>()
   if (providerTargetProject) {
     providerTargetProject.gitUrls?.forEach((repo) => existingProviderRepoUrls.add(normalizeGitUrl(repo.url)))
-    if (
-      (!providerTargetProject.gitUrls || providerTargetProject.gitUrls.length === 0) &&
-      providerTargetProject.gitUrl
-    ) {
+    if (providerTargetProject.gitUrl) {
       existingProviderRepoUrls.add(normalizeGitUrl(providerTargetProject.gitUrl))
     }
   }

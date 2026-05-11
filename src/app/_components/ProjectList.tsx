@@ -1,7 +1,7 @@
 'use client'
 
 import type { Project } from '../_types'
-import { timeAgo, truncateUrl } from '../_lib/utils'
+import { extractRepoName, normalizeGitUrl, timeAgo, truncateUrl } from '../_lib/utils'
 
 function getSyncErrorText(syncError?: string | null): string {
   const message = syncError?.replace(/\s+/g, ' ').trim()
@@ -12,6 +12,22 @@ function truncateSyncError(syncError?: string | null, maxLength = 140): string {
   const message = getSyncErrorText(syncError)
   if (message.length <= maxLength) return message
   return `${message.slice(0, maxLength - 3)}...`
+}
+
+function getDisplayRepos(project: Project) {
+  const repos = project.gitUrls && project.gitUrls.length > 0 ? [...project.gitUrls] : []
+  if (project.gitUrl) {
+    const normalizedPrimaryUrl = normalizeGitUrl(project.gitUrl)
+    const hasPrimaryRepo = repos.some((repo) => normalizeGitUrl(repo.url) === normalizedPrimaryUrl)
+    if (!hasPrimaryRepo) {
+      repos.unshift({
+        url: project.gitUrl,
+        branch: project.branch || 'main',
+        name: extractRepoName(project.gitUrl)
+      })
+    }
+  }
+  return repos
 }
 
 type ProjectListProps = {
@@ -87,6 +103,7 @@ export function ProjectList({
           const isError = project.syncStatus === 'error'
           const isDisabled = isSyncing
           const syncErrorText = getSyncErrorText(project.syncError)
+          const displayRepos = getDisplayRepos(project)
 
           return (
             <div key={project.id}>
@@ -118,8 +135,8 @@ export function ProjectList({
               <div className="project-meta">
                 {isFullAccess && (
                   <>
-                    {project.gitUrls && project.gitUrls.length > 0 ? (
-                      project.gitUrls.map((repo, repoIndex) => (
+                    {displayRepos.length > 0 ? (
+                      displayRepos.map((repo, repoIndex) => (
                         <div key={`${project.id}-${repoIndex}`}>
                           {truncateUrl(repo.url)} ({repo.branch})
                         </div>

@@ -60,6 +60,12 @@ function normalizeRepoUrl(url: string): string {
   }
 }
 
+function repoListHasUrl(repos: { url: string }[] | null | undefined, gitUrl: string | null | undefined): boolean {
+  if (!gitUrl) return false
+  const normalizedGitUrl = normalizeRepoUrl(gitUrl)
+  return (repos || []).some((repo) => normalizeRepoUrl(repo.url) === normalizedGitUrl)
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message
@@ -369,7 +375,8 @@ async function syncRepoAtPath(
   gitUrl: string,
   branch: string,
   repoPath: string,
-  repoLabel: string
+  repoLabel: string,
+  options: { removeOnFailure?: boolean } = {}
 ): Promise<void> {
   try {
     await fs.access(repoPath)
@@ -380,7 +387,10 @@ async function syncRepoAtPath(
     }
     await git.pull('origin', branch)
     console.log(`Pulled ${repoLabel} successfully`)
-  } catch {
+  } catch (error) {
+    if (options.removeOnFailure === false) {
+      throw error
+    }
     try {
       await fs.rm(repoPath, { recursive: true, force: true })
     } catch {
@@ -443,6 +453,9 @@ async function cloneProjectWorkspace(project: Project): Promise<void> {
   await fs.mkdir(project.workspacePath, { recursive: true })
 
   if (project.gitUrls && project.gitUrls.length > 0) {
+    if (project.gitUrl && !repoListHasUrl(project.gitUrls, project.gitUrl)) {
+      await cloneProjectRepo(project, project.gitUrl, project.branch, project.workspacePath, project.name)
+    }
     for (const repo of project.gitUrls) {
       const repoPath = path.join(project.workspacePath, repo.name)
       await cloneProjectRepo(project, repo.url, repo.branch, repoPath, repo.name)
@@ -463,6 +476,16 @@ async function syncProjectWorkspace(
 
   if (project.gitUrls && project.gitUrls.length > 0) {
     await fs.mkdir(project.workspacePath, { recursive: true })
+    if (project.gitUrl && !repoListHasUrl(project.gitUrls, project.gitUrl)) {
+      await syncRepoAtPath(
+        project,
+        project.gitUrl,
+        project.branch,
+        project.workspacePath,
+        project.name,
+        { removeOnFailure: false }
+      )
+    }
     for (const repo of project.gitUrls) {
       const repoPath = path.join(project.workspacePath, repo.name)
       await syncRepoAtPath(project, repo.url, repo.branch, repoPath, repo.name)
@@ -887,6 +910,10 @@ export async function updateProjectRepoBranch(
       return { ...repo, branch: nextBranch }
     })
 
+    const isPrimaryRepo = !!project.gitUrl && normalizeRepoUrl(project.gitUrl) === normalizedRepoUrl
+    if (isPrimaryRepo) {
+      found = true
+    }
     if (!found) {
       throw new Error(`Repository not found in project: ${repoUrl}`)
     }
@@ -902,7 +929,7 @@ export async function updateProjectRepoBranch(
       sync_error: null
     }
 
-    if (normalizeRepoUrl(project.gitUrl) === normalizedRepoUrl) {
+    if (isPrimaryRepo) {
       update.branch = nextBranch
     }
 
